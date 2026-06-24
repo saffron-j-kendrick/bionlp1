@@ -147,6 +147,10 @@ activemq-data/
 # SageMath parsed files
 *.sage.py
 
+# Data
+medal-emnlp/
+medal-emnlp.zip
+
 # Environments
 .env
 .envrc

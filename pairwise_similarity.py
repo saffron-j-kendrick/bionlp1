@@ -26,12 +26,11 @@ sentence_2 = adam_sentences.iloc[3]["Sentence"]
 def remove_punctuation(sentence):
     return re.sub(r'[^\w\s]', '', sentence)
 
-def remove_abbreviations(sentence):
+def remove_abbreviations(abbr, sentence):
     sentence = re.sub(r'\([^)]*\)', '', sentence)
 
-    for abbr in abbrvs:
-        if abbr in sentence:
-            sentence = re.sub(abbr, '', sentence)
+    if abbr in sentence:
+        sentence = re.sub(abbr, '', sentence)
     return sentence
 
 
@@ -49,7 +48,7 @@ def tokenize_sentence(sentence):
 # sentence_3 = remove_punctuation(sentence_3)
 # print(sentence_3)
 
-
+abbr_1 = "AAA"
 sentence_1 = "OBJECTIVE: abdominal aortic aneurysm represents a chronic degenerative condition associated with atherosclerosis."
 sentence_2 = "METHODS: The Canadian Institute for Health Information database (a collection of all acute care hospitalizations) was reviewed to identify patients who received nonemergent repair of an AAA  between April 1, 2003 and March 31, 2004."
 sentence_3 = "Guidelines from the AAA recommend routine hearing screenings for adults over the age of 50."
@@ -101,18 +100,18 @@ input_ids_3 = inputs_3["input_ids"]
 attention_mask_3 = inputs_3["attention_mask"]
 outputs_3 = model(**inputs_3)
 
-# print(outputs_1)
-# print(outputs_2)
-# print(outputs_3)
+# print(outputs_1)  #batch_size, sequence_length, hidden_size
+# print(outputs_2)  #batch_size, sequence_length, hidden_size
+# print(outputs_3)  #batch_size, sequence_length, hidden_size
 
-output_1_hidden_states = torch.tensor(outputs_1.hidden_states[-1]).detach().squeeze(0)
-output_2_hidden_states = torch.tensor(outputs_2.hidden_states[-1]).detach().squeeze(0)
-output_3_hidden_states = torch.tensor(outputs_3.hidden_states[-1]).detach().squeeze(0)
+output_1_hidden_states = torch.tensor(outputs_1.hidden_states[-1]).detach().squeeze(0) #sequence_length, hidden_size
+output_2_hidden_states = torch.tensor(outputs_2.hidden_states[-1]).detach().squeeze(0) #sequence_length, hidden_size
+output_3_hidden_states = torch.tensor(outputs_3.hidden_states[-1]).detach().squeeze(0) #sequence_length, hidden_size
 
 print(output_1_hidden_states.shape)
 print(output_2_hidden_states.shape)
 print(output_3_hidden_states.shape)
 
-print((cosine_similarity(output_1_hidden_states, output_2_hidden_states)).shape)
-print((cosine_similarity(output_1_hidden_states, output_3_hidden_states)).shape)
-print((cosine_similarity(output_2_hidden_states, output_3_hidden_states)).shape)
+print((cosine_similarity(output_1_hidden_states, output_2_hidden_states)).shape) #seq_length1, seq_length2
+print((cosine_similarity(output_1_hidden_states, output_3_hidden_states)).shape) #seq_length1, seq_length3
+print((cosine_similarity(output_2_hidden_states, output_3_hidden_states)).shape) #seq_length2, seq_length3

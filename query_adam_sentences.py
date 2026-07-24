@@ -21,7 +21,7 @@ from bs4 import BeautifulSoup
 ADAM_URL  = "https://arrowsmith.psych.uic.edu/cgi-bin/arrowsmith_uic/adam.cgi"
 INPUT_CSV = "adam_results.csv"
 OUTPUT_CSV = "adam_sentences.csv"
-N_SENTENCES = 10
+N_SENTENCES = 20
 DELAY = 1.2   # seconds between requests
 
 

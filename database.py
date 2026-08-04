@@ -120,6 +120,16 @@ def keep_ten_sentences_per_abbr(triple_sentence_dataframe: pd.DataFrame) -> pd.D
         new_dataframe = pd.concat([new_dataframe, abbr_sentences])
     return new_dataframe
 
+def remove_abbreviations(sentence: str, pattern: str) -> str:
+    return re.sub(pattern, '', sentence)
+
+def remove_punctuation(sentence: str) -> str:
+    return re.sub(r'[^\w\s]', '', sentence)
+
+def sentence_a_no_abbreviations(dataframe: pd.DataFrame) -> pd.DataFrame:
+    pattern = re.compile(ACRONYM_PATTERN)
+    dataframe["sentence_a"] = dataframe["sentence_a"].apply(lambda x: remove_abbreviations(x, pattern))
+    return dataframe
 
 def main():
     # # load the csv of all sentences
@@ -161,19 +171,14 @@ def main():
     print(f"Removed rows where the count for the abbr is less than 10")
     print(f"Kept 10 sentences per abbreviation")
     print(f"New dataframe has {len(triple_sentence_dataframe)} rows")
-    #print the max
-    print(f"The max count is {triple_sentence_dataframe['abbr'].value_counts().max()}")
-    # print the min
-    print(f"The min count is {triple_sentence_dataframe['abbr'].value_counts().min()}")
-    # print the mean
-    print(f"The mean count is {triple_sentence_dataframe['abbr'].value_counts().mean()}")
-    # print the median
-    print(f"The median count is {triple_sentence_dataframe['abbr'].value_counts().median()}")
-    # print the mode
-    print(f"The mode count is {triple_sentence_dataframe['abbr'].value_counts().mode()}")
+    
+    # remove abbreviations from column sentence_a
+    triple_sentence_dataframe = sentence_a_no_abbreviations(triple_sentence_dataframe)
+    print(triple_sentence_dataframe.head())
+
     
     # save the dataframe
-    triple_sentence_dataframe.to_csv("triple_sentence_filtered.csv", index=False)
+    triple_sentence_dataframe.to_csv("triple_sentence_filtered_sentence_a.csv", index=False)
 
 
 if __name__ == "__main__":

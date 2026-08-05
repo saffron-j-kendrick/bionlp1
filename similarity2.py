@@ -1,3 +1,5 @@
+## IMPORTS 
+
 import os
 import numpy as np
 import torch
@@ -20,14 +22,46 @@ from scipy.stats import pearsonr, kendalltau, spearmanr, ttest_1samp
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+ACL_COLUMN_WIDTH = 3.30
+ACL_TEXT_WIDTH = 7.00
+ACL_RSA_HEIGHT = 4.50
+ACL_SINGLE_HEIGHT = 2.80
 
+plt.rcParams.update({
+    "text.usetex": False,
+    "font.family": "serif",
+    "font.serif": ["Times New Roman", "Times", "Nimbus Roman", "DejaVu Serif"],
+    "mathtext.fontset": "stix",
+    "font.size": 8,
+    "axes.titlesize": 9,
+    "axes.labelsize": 9,
+    "xtick.labelsize": 7.5,
+    "ytick.labelsize": 7.5,
+    "legend.fontsize": 7.5,
+    "lines.linewidth": 1.1,
+    "lines.markersize": 3.0,
+    "axes.linewidth": 0.7,
+    "xtick.major.width": 0.7,
+    "ytick.major.width": 0.7,
+    "xtick.major.size": 3,
+    "ytick.major.size": 3,
+    # Embed TrueType fonts in vector output for reliable PDF rendering.
+    "pdf.fonttype": 42,
+    "ps.fonttype": 42,
+    "savefig.bbox": "tight",
+    "savefig.pad_inches": 0.02,
+})
 
 access_token = os.environ.get('HF_TOKEN_LLAMA')
 
 if access_token is None:
     raise ValueError("HF_TOKEN is not set")
 
-### FUNCTIONS ###
+
+model_name_map = {'meta-llama/Llama-3.2-3B' : 'Llama', "openai-community/gpt2" : "GPT2", "tiiuae/Falcon3-7B-Base" : "Falcon", "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B" : "DeepSeek", "Qwen/Qwen2.5-7B" : "Qwen", "mistralai/Mistral-7B-v0.1" : "Mistral", "microsoft/biogpt" : "BioGPT", "google/multiberts-seed_3" : "MultiBERTs", "FacebookAI/roberta-base" : "RoBERTa", "dmis-lab/biobert-base-cased-v1.2" : "BioBERT"}
+
+
+## FUNCTIONS
 
 
 def remove_punctuation(sentence):
@@ -80,7 +114,7 @@ def search_sequence_numpy(arr,seq):
         return []   
 
 def get_target_token_embeddings(model_name, model, tokeniser, input_ids, attention_mask, layers, torch_device, add_arg_dict={}, batch_size = 1, middle_dim=None, target_word=None):
-    print(f'Extracting representations from model for layers {layers}')
+    print(f'Extracting target representations from model for layers {layers}')
     # Move data to the torch device (cpu or gpu)
     input_ids = input_ids.to(torch_device)
     attention_mask = attention_mask.to(torch_device)
@@ -143,7 +177,57 @@ def get_target_token_embeddings(model_name, model, tokeniser, input_ids, attenti
     
     return tokens_per_layer
 
-### SENTENCES ###
+
+def get_mean_token_embeddings(model_name, model, tokeniser, input_ids, attention_mask, layers, torch_device, add_arg_dict={}, batch_size = 1, middle_dim=None):
+    print(f'Extracting mean epresentations from model for layers {layers}')
+    # Move data to the torch device (cpu or gpu)
+    input_ids = input_ids.to(torch_device)
+    attention_mask = attention_mask.to(torch_device)
+    model.to(torch_device)
+
+    # Initialize token representations dynamically 
+    tokens_per_layer = [
+        np.zeros((input_ids.shape[0], model.config.hidden_size))
+        for _ in layers
+    ]
+
+    # Extracting representations during the forward pass
+    with torch.no_grad():
+        for i in tqdm.tqdm(range(0, input_ids.shape[0], batch_size)):
+            outputs = model(
+                input_ids[i:i+batch_size],
+                attention_mask=attention_mask[i:i+batch_size],
+                output_hidden_states=True
+            )
+            hidden_states = outputs.hidden_states[1:]  # Exclude embeddings
+            add_arg_dict["i"] = i
+
+            # process each layer and get the mean token embedding
+            for layer_idx, layer in enumerate(layers):
+                token_reps = hidden_states
+
+                # Get tokens where tokens aren't special tokens or pad tokens
+                non_special_token_mask = lambda x: np.array(tokeniser.get_special_tokens_mask(x, already_has_special_tokens=True)) == 0
+                pad_token_mask = lambda x: np.array(x.cpu() == tokeniser.pad_token_id)
+                get_tokens_to_keep = lambda x: np.argwhere(non_special_token_mask(x) * (pad_token_mask(x) == False)).reshape(-1)
+
+                # Get the mean token embedding
+                if model_name in ['distilroberta-base', 'xlnet-base-cased', 'xlm-mlm-xnli15-1024']:
+                    layer_reps = token_reps[1][layer].cpu()[:, :, :]
+                elif layer == model.config.num_hidden_layers:
+                    layer_reps = token_reps[0].cpu()[:, :, :]
+                elif model_name in ['meta-llama/Llama-3.2-1B', 'microsoft/phi-1', 'openai-community/gpt2', 'microsoft/biogpt', 'medicalai/ClinicalGPT-base-zh', 'meta-llama/Llama-3.2-3B', "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B", "Qwen/Qwen2.5-7B", "mistralai/Mistral-7B-v0.1", "tiiuae/Falcon3-7B-Base", 'google/multiberts-seed_3', 'FacebookAI/roberta-base', 'dmis-lab/biobert-base-cased-v1.2']:
+                    layer_reps = token_reps[layer].cpu()[:, :, :]
+                else:
+                    layer_reps = token_reps[2][layer].cpu()[:, :, :]
+                
+                tokens_per_layer[layer_idx][i:i+batch_size, :] = np.vstack([np.mean(reps[get_tokens_to_keep(input_ids[i])].cpu().numpy(), axis=0) for i, reps in enumerate(layer_reps)])
+                
+                # print(tokens_per_layer.shape)
+
+    return tokens_per_layer
+
+## SENTENCES 
 
 
 abbr_dataset = pd.read_excel("triple_sentence_test_set.xlsx")
@@ -203,28 +287,56 @@ for model_name in tqdm.tqdm(models):
     sentence_b_embs = []
     sentence_c_embs = []
 
-    for i in range(len(sentence_a_embeddings)):
-        sent_a = sentence_a_embeddings[i]
-        sent_b = sentence_b_embeddings[i]
-        sent_c = sentence_c_embeddings[i]
-        target = targets[i]
 
-        inputs_a = tokeniser(sent_a,  max_length = 512, return_tensors="pt", truncation=True, padding=True)
-        input_ids_a = inputs_a["input_ids"]
-        attention_mask_a = inputs_a["attention_mask"]
-        embeddings_a = get_target_token_embeddings(model_name, model, tokeniser, input_ids_a, attention_mask_a, layers, torch_device, batch_size=1, middle_dim=None, target_word=target)
-        sentence_a_embs.append(embeddings_a)
+    
+    if model_name in ['google/multiberts-seed_3', 'FacebookAI/roberta-base', 'dmis-lab/biobert-base-cased-v1.2']:
+        print(f'Extracting mean token embeddings for {model_name}')
+        for i in range(len(sentence_a_embeddings)):
+            sent_a = sentence_a_embeddings[i]
+            sent_b = sentence_b_embeddings[i]
+            sent_c = sentence_c_embeddings[i]
+            target = targets[i]
 
-        inputs_b = tokeniser(sent_b,  max_length = 512, return_tensors="pt", truncation=True, padding=True)
-        input_ids_b = inputs_b["input_ids"]
-        attention_mask_b = inputs_b["attention_mask"]
-        embeddings_b = get_target_token_embeddings(model_name, model, tokeniser, input_ids_b, attention_mask_b, layers, torch_device, batch_size=1, middle_dim=None, target_word=target)
-        sentence_b_embs.append(embeddings_b)
-        inputs_c = tokeniser(sent_c,  max_length = 512, return_tensors="pt", truncation=True, padding=True)
-        input_ids_c = inputs_c["input_ids"]
-        attention_mask_c = inputs_c["attention_mask"]
-        embeddings_c = get_target_token_embeddings(model_name, model, tokeniser, input_ids_c, attention_mask_c, layers, torch_device, batch_size=1, middle_dim=None, target_word=target)
-        sentence_c_embs.append(embeddings_c)
+            inputs_a = tokeniser(sent_a,  max_length = 512, return_tensors="pt", truncation=True, padding=True)
+            input_ids_a = inputs_a["input_ids"]
+            attention_mask_a = inputs_a["attention_mask"]
+            embeddings_a = get_mean_token_embeddings(model_name, model, tokeniser, input_ids_a, attention_mask_a, layers, torch_device, batch_size=1, middle_dim=None)
+            sentence_a_embs.append(embeddings_a)
+
+            inputs_b = tokeniser(sent_b,  max_length = 512, return_tensors="pt", truncation=True, padding=True)
+            input_ids_b = inputs_b["input_ids"]
+            attention_mask_b = inputs_b["attention_mask"]
+            embeddings_b = get_mean_token_embeddings(model_name, model, tokeniser, input_ids_b, attention_mask_b, layers, torch_device, batch_size=1, middle_dim=None)
+            sentence_b_embs.append(embeddings_b)
+            inputs_c = tokeniser(sent_c,  max_length = 512, return_tensors="pt", truncation=True, padding=True)
+            input_ids_c = inputs_c["input_ids"]
+            attention_mask_c = inputs_c["attention_mask"]
+            embeddings_c = get_mean_token_embeddings(model_name, model, tokeniser, input_ids_c, attention_mask_c, layers, torch_device, batch_size=1, middle_dim=None)
+            sentence_c_embs.append(embeddings_c)
+    else:
+        print(f'Extracting target token embeddings for {model_name}')
+        for i in range(len(sentence_a_embeddings)):
+            sent_a = sentence_a_embeddings[i]
+            sent_b = sentence_b_embeddings[i]
+            sent_c = sentence_c_embeddings[i]
+            target = targets[i]
+
+            inputs_a = tokeniser(sent_a,  max_length = 512, return_tensors="pt", truncation=True, padding=True)
+            input_ids_a = inputs_a["input_ids"]
+            attention_mask_a = inputs_a["attention_mask"]
+            embeddings_a = get_target_token_embeddings(model_name, model, tokeniser, input_ids_a, attention_mask_a, layers, torch_device, batch_size=1, middle_dim=None, target_word=target)
+            sentence_a_embs.append(embeddings_a)
+
+            inputs_b = tokeniser(sent_b,  max_length = 512, return_tensors="pt", truncation=True, padding=True)
+            input_ids_b = inputs_b["input_ids"]
+            attention_mask_b = inputs_b["attention_mask"]
+            embeddings_b = get_target_token_embeddings(model_name, model, tokeniser, input_ids_b, attention_mask_b, layers, torch_device, batch_size=1, middle_dim=None, target_word=target)
+            sentence_b_embs.append(embeddings_b)
+            inputs_c = tokeniser(sent_c,  max_length = 512, return_tensors="pt", truncation=True, padding=True)
+            input_ids_c = inputs_c["input_ids"]
+            attention_mask_c = inputs_c["attention_mask"]
+            embeddings_c = get_target_token_embeddings(model_name, model, tokeniser, input_ids_c, attention_mask_c, layers, torch_device, batch_size=1, middle_dim=None, target_word=target)
+            sentence_c_embs.append(embeddings_c)
     sentence_a_avg_embs = [np.mean(np.vstack(emb), axis=0) for emb in sentence_a_embs]
     sentence_b_avg_embs = [np.mean(np.vstack(emb), axis=0) for emb in sentence_b_embs]
     sentence_c_avg_embs = [np.mean(np.vstack(emb), axis=0) for emb in sentence_c_embs]
@@ -254,17 +366,23 @@ for model_name in tqdm.tqdm(models):
         CosSim_23.append(np.mean(sims_23))
     
     # plot three lines in one plot
-    model_name = model_name.replace('/', '_')
-    plt.figure(figsize=(10, 5))
-    plt.plot(CosSim_12, label='Average Cosine Similarity between Sentence 1 and Sentence 2')
-    plt.plot(CosSim_13, label='Average Cosine Similarity between Sentence 1 and Sentence 3')
-    plt.plot(CosSim_23, label='Average Cosine Similarity between Sentence 2 and Sentence 3')
+    model_name = model_name_map[model_name]
+    
+
+    plt.figure(figsize=(ACL_COLUMN_WIDTH, ACL_SINGLE_HEIGHT))
+    plt.plot(CosSim_12, label='Pair: Sentence 1 and Sentence 2')
+    plt.plot(CosSim_13, label='Pair: Sentence 1 and Sentence 3')
+    plt.plot(CosSim_23, label='Pair: Sentence 2 and Sentence 3')
     plt.xlabel('Layer')
     plt.ylabel('Average Cosine Similarity')
-    plt.title(f'Average Cosine Similarity using the target token embeddings for {model_name}')
+    if model_name in ['MultiBERTs', 'RoBERTa', 'BioBERT']:
+        plt.title(f'Average Cosine Similarity using the mean token embeddings for {model_name}')
+    else:
+        plt.title(f'Average Cosine Similarity using the target token embeddings for {model_name}')
     plt.legend()
     plt.savefig(f'figures/CosineSimilarityFinalTokenEmbeddings_{model_name}_test.png')
     plt.savefig(f'figures/CosineSimilarityFinalTokenEmbeddings_{model_name}_test.eps')
+    plt.savefig(f'figures/CosineSimilarityFinalTokenEmbeddings_{model_name}_test.pdf')
     plt.show()
     plt.close()
 

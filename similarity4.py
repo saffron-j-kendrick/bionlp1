@@ -58,7 +58,7 @@ if access_token is None:
     raise ValueError("HF_TOKEN is not set")
 
 
-model_name_map = {'meta-llama/Llama-3.2-3B' : 'Llama', "openai-community/gpt2" : "GPT2", "tiiuae/Falcon3-7B-Base" : "Falcon", "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B" : "DeepSeek", "Qwen/Qwen2.5-7B" : "Qwen", "mistralai/Mistral-7B-v0.1" : "Mistral", "microsoft/biogpt" : "BioGPT", "google/multiberts-seed_3" : "MultiBERTs", "FacebookAI/roberta-base" : "RoBERTa", "dmis-lab/biobert-base-cased-v1.2" : "BioBERT", "ContactDoctor/Bio-Medical-Llama-3-8B" : "Bio-Medical-Llama", "tarun7r/Finance-Llama-8B" : "Finance-Llama"}
+model_name_map = {'meta-llama/Llama-3.2-3B' : 'Llama', "openai-community/gpt2" : "GPT2", "tiiuae/Falcon3-7B-Base" : "Falcon", "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B" : "DeepSeek", "Qwen/Qwen2.5-7B" : "Qwen", "mistralai/Mistral-7B-v0.1" : "Mistral", "microsoft/biogpt" : "BioGPT", "google/multiberts-seed_3" : "MultiBERTs", "FacebookAI/roberta-base" : "RoBERTa", "dmis-lab/biobert-base-cased-v1.2" : "BioBERT", "ContactDoctor/Bio-Medical-Llama-3-8B" : "Bio-Medical-Llama", "tarun7r/Finance-Llama-8B" : "Finance-Llama", "marcev/financebert" : "FinanceBERT"}
 
 
 ## FUNCTIONS
@@ -113,6 +113,42 @@ def search_sequence_numpy(arr,seq):
     else:
         return []   
 
+def find_target_positions(tokeniser, sentence_ids, target_word):
+    """Find the token indices in sentence_ids that correspond to target_word.
+
+    Tries three strategies in order:
+    1. Exact token-id match (no leading space).
+    2. Exact token-id match with a leading space (handles GPT-2 / Mistral-style
+       SentencePiece tokenisers where mid-sentence words carry a ▁ prefix).
+    3. Decode-and-match fallback: slide a window over the token sequence,
+       decode each span, and compare to the target string.  This handles cases
+       where the in-context subword split differs from the isolated encoding
+       (common with SentencePiece BPE models such as Mistral).
+    Returns the indices array (same format as search_sequence_numpy) or [].
+    """
+    # Strategy 1: bare word
+    ids = np.array(tokeniser.encode(target_word, add_special_tokens=False))
+    loc = search_sequence_numpy(sentence_ids, ids.reshape(-1))
+    if len(loc) > 0:
+        return loc
+
+    # Strategy 2: leading space
+    ids_spaced = np.array(tokeniser.encode(' ' + target_word, add_special_tokens=False))
+    loc = search_sequence_numpy(sentence_ids, ids_spaced.reshape(-1))
+    if len(loc) > 0:
+        return loc
+
+    # Strategy 3: decode-and-match (case-insensitive, strips whitespace)
+    target_norm = target_word.strip().lower()
+    n = len(sentence_ids)
+    for start in range(n):
+        for end in range(start + 1, min(start + 12, n + 1)):
+            span_text = tokeniser.decode(sentence_ids[start:end]).strip().lower()
+            if span_text == target_norm:
+                return np.array(list(range(start, end)))
+
+    return []
+
 def get_target_token_embeddings(model_name, model, tokeniser, input_ids, attention_mask, layers, torch_device, add_arg_dict={}, batch_size = 1, middle_dim=None, target_word=None):
     print(f'Extracting target representations from model for layers {layers}')
     # When device_map="auto" is used, accelerate manages device placement via hooks;
@@ -154,22 +190,20 @@ def get_target_token_embeddings(model_name, model, tokeniser, input_ids, attenti
                     layer_reps = token_reps[1][layer].cpu()[:, :, :]
                 elif layer == model.config.num_hidden_layers:
                     layer_reps = token_reps[0].cpu()[:, :, :]
-                elif model_name in ['meta-llama/Llama-3.2-1B', 'microsoft/phi-1', 'openai-community/gpt2', 'microsoft/biogpt', 'medicalai/ClinicalGPT-base-zh', 'meta-llama/Llama-3.2-3B', "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B", "Qwen/Qwen2.5-7B", "mistralai/Mistral-7B-v0.1", "tiiuae/Falcon3-7B-Base", 'google/multiberts-seed_3', 'FacebookAI/roberta-base', 'dmis-lab/biobert-base-cased-v1.2', 'ContactDoctor/Bio-Medical-Llama-3-8B', 'tarun7r/Finance-Llama-8B']:
+                elif model_name in ['meta-llama/Llama-3.2-1B', 'microsoft/phi-1', 'openai-community/gpt2', 'microsoft/biogpt', 'medicalai/ClinicalGPT-base-zh', 'meta-llama/Llama-3.2-3B', "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B", "Qwen/Qwen2.5-7B", "mistralai/Mistral-7B-v0.1", "tiiuae/Falcon3-7B-Base", 'google/multiberts-seed_3', 'FacebookAI/roberta-base', 'dmis-lab/biobert-base-cased-v1.2', 'ContactDoctor/Bio-Medical-Llama-3-8B', 'tarun7r/Finance-Llama-8B', 'marcev/financebert']:
                     layer_reps = token_reps[layer].cpu()[:, :, :]
                 else:
                     layer_reps = token_reps[2][layer].cpu()[:, :, :]
                     
-                # get the target token ids (encoded once, no special tokens)
-                # also try with a leading space for tokenizers that encode mid-sentence words differently (e.g. GPT-2)
-                target_token_ids = np.array(tokeniser.encode(target_word, add_special_tokens=False))
-                target_token_ids_spaced = np.array(tokeniser.encode(' ' + target_word, add_special_tokens=False))
+                # Locate target word tokens using the three-strategy helper
+                # (bare, leading-space, and decode-and-match fallback for
+                # SentencePiece models like Mistral whose in-context splits
+                # may differ from isolated encodings).
                 current_batch_size = layer_reps.shape[0]
                 target_token_loc_per_sent = []
                 for i in range(current_batch_size):
                     sentence_ids = input_ids[batch_start + i, :].cpu().numpy().reshape(-1)
-                    loc = search_sequence_numpy(sentence_ids, target_token_ids.reshape(-1))
-                    if len(loc) == 0:
-                        loc = search_sequence_numpy(sentence_ids, target_token_ids_spaced.reshape(-1))
+                    loc = find_target_positions(tokeniser, sentence_ids, target_word)
                     if len(loc) == 0:
                         raise ValueError(f"Target word '{target_word}' not found in sentence token ids at batch index {batch_start + i}")
                     target_token_loc_per_sent.append(loc)
@@ -220,7 +254,7 @@ def get_mean_token_embeddings(model_name, model, tokeniser, input_ids, attention
                     layer_reps = token_reps[1][layer].cpu()[:, :, :]
                 elif layer == model.config.num_hidden_layers:
                     layer_reps = token_reps[0].cpu()[:, :, :]
-                elif model_name in ['meta-llama/Llama-3.2-1B', 'microsoft/phi-1', 'openai-community/gpt2', 'microsoft/biogpt', 'medicalai/ClinicalGPT-base-zh', 'meta-llama/Llama-3.2-3B', "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B", "Qwen/Qwen2.5-7B", "mistralai/Mistral-7B-v0.1", "tiiuae/Falcon3-7B-Base", 'google/multiberts-seed_3', 'FacebookAI/roberta-base', 'dmis-lab/biobert-base-cased-v1.2', 'ContactDoctor/Bio-Medical-Llama-3-8B', 'tarun7r/Finance-Llama-8B']:
+                elif model_name in ['meta-llama/Llama-3.2-1B', 'microsoft/phi-1', 'openai-community/gpt2', 'microsoft/biogpt', 'medicalai/ClinicalGPT-base-zh', 'meta-llama/Llama-3.2-3B', "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B", "Qwen/Qwen2.5-7B", "mistralai/Mistral-7B-v0.1", "tiiuae/Falcon3-7B-Base", 'google/multiberts-seed_3', 'FacebookAI/roberta-base', 'dmis-lab/biobert-base-cased-v1.2', 'ContactDoctor/Bio-Medical-Llama-3-8B', 'tarun7r/Finance-Llama-8B', 'marcev/financebert']:
                     layer_reps = token_reps[layer].cpu()[:, :, :]
                 else:
                     layer_reps = token_reps[2][layer].cpu()[:, :, :]
@@ -260,41 +294,24 @@ for i in range(len(abbr_dataset)):
 
 ### MODELS ###
 
-# dev_model_configs = {'meta-llama/Llama-3.2-3B' : (AutoConfig.from_pretrained("meta-llama/Llama-3.2-3B", token = access_token), AutoModelForCausalLM.from_pretrained("meta-llama/Llama-3.2-3B", token = access_token), AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-3B", token = access_token) , 'meta-llama/Llama-3.2-3B'),
-#                     'ContactDoctor/Bio-Medical-Llama-3-8B' : (AutoConfig.from_pretrained("ContactDoctor/Bio-Medical-Llama-3-8B", token = access_token), AutoModelForCausalLM.from_pretrained("ContactDoctor/Bio-Medical-Llama-3-8B", token = access_token), AutoTokenizer.from_pretrained("ContactDoctor/Bio-Medical-Llama-3-8B", token = access_token), 'ContactDoctor/Bio-Medical-Llama-3-8B'),
-#                     'tarun7r/Finance-Llama-8B' : (AutoConfig.from_pretrained("tarun7r/Finance-Llama-8B", token = access_token), AutoModelForCausalLM.from_pretrained("tarun7r/Finance-Llama-8B", token = access_token), AutoTokenizer.from_pretrained("tarun7r/Finance-Llama-8B", token = access_token), 'tarun7r/Finance-Llama-8B'),
-#                     'microsoft/biogpt' : (AutoConfig.from_pretrained("microsoft/biogpt", token = access_token), AutoModelForCausalLM.from_pretrained("microsoft/biogpt", token = access_token), AutoTokenizer.from_pretrained("microsoft/biogpt", token = access_token), 'microsoft/biogpt'),
-#                     'openai-community/gpt2' : (AutoConfig.from_pretrained("openai-community/gpt2"), AutoModelForCausalLM.from_pretrained("openai-community/gpt2"), AutoTokenizer.from_pretrained("openai-community/gpt2"), 'openai-community/gpt2'),
-#                     'Qwen/Qwen2.5-7B' : (AutoConfig.from_pretrained("Qwen/Qwen2.5-7B"), AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-7B"), AutoTokenizer.from_pretrained("Qwen/Qwen2.5-7B"), 'Qwen/Qwen2.5-7B'),
-#                     'mistralai/Mistral-7B-v0.1' : (AutoConfig.from_pretrained("mistralai/Mistral-7B-v0.1"), AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.1"), AutoTokenizer.from_pretrained("mistralai/Mistral-7B-v0.1"), 'mistralai/Mistral-7B-v0.1'),
-#                     'tiiuae/Falcon3-7B-Base' : (AutoConfig.from_pretrained("tiiuae/Falcon3-7B-Base"), AutoModelForCausalLM.from_pretrained("tiiuae/Falcon3-7B-Base"), AutoTokenizer.from_pretrained("tiiuae/Falcon3-7B-Base"), 'tiiuae/Falcon3-7B-Base'),
-#                     'google/multiberts-seed_3' : (AutoConfig.from_pretrained("google/multiberts-seed_3"), AutoModelForMaskedLM.from_pretrained("google/multiberts-seed_3"), AutoTokenizer.from_pretrained("google/multiberts-seed_3"), 'google/multiberts-seed_3'),
-#                     'FacebookAI/roberta-base' : (AutoConfig.from_pretrained("FacebookAI/roberta-base"), AutoModelForMaskedLM.from_pretrained("FacebookAI/roberta-base"), AutoTokenizer.from_pretrained("FacebookAI/roberta-base"), 'FacebookAI/roberta-base'),
-#                     'dmis-lab/biobert-base-cased-v1.2' : (AutoConfig.from_pretrained("dmis-lab/biobert-base-cased-v1.2"), AutoModelForMaskedLM.from_pretrained("dmis-lab/biobert-base-cased-v1.2"), AutoTokenizer.from_pretrained("dmis-lab/biobert-base-cased-v1.2"), 'dmis-lab/biobert-base-cased-v1.2')}
+dev_model_configs = {'meta-llama/Llama-3.2-3B' : (AutoConfig.from_pretrained("meta-llama/Llama-3.2-3B", token = access_token), AutoModelForCausalLM.from_pretrained("meta-llama/Llama-3.2-3B", token = access_token), AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-3B", token = access_token) , 'meta-llama/Llama-3.2-3B'),
+                    'microsoft/biogpt' : (AutoConfig.from_pretrained("microsoft/biogpt", token = access_token), AutoModelForCausalLM.from_pretrained("microsoft/biogpt", token = access_token), AutoTokenizer.from_pretrained("microsoft/biogpt", token = access_token), 'microsoft/biogpt'),
+                    'google/multiberts-seed_3' : (AutoConfig.from_pretrained("google/multiberts-seed_3"), AutoModelForMaskedLM.from_pretrained("google/multiberts-seed_3"), AutoTokenizer.from_pretrained("google/multiberts-seed_3"), 'google/multiberts-seed_3'),
+                    'marcev/financebert' : (AutoConfig.from_pretrained("marcev/financebert"), AutoModelForMaskedLM.from_pretrained("marcev/financebert"), AutoTokenizer.from_pretrained("marcev/financebert"), 'marcev/financebert'),
+                    'dmis-lab/biobert-base-cased-v1.2' : (AutoConfig.from_pretrained("dmis-lab/biobert-base-cased-v1.2"), AutoModelForMaskedLM.from_pretrained("dmis-lab/biobert-base-cased-v1.2"), AutoTokenizer.from_pretrained("dmis-lab/biobert-base-cased-v1.2"), 'dmis-lab/biobert-base-cased-v1.2')}
 
 #dev_model_configs = {'tarun7r/Finance-Llama-8B' : (AutoConfig.from_pretrained("tarun7r/Finance-Llama-8B", token = access_token), AutoModelForCausalLM.from_pretrained("tarun7r/Finance-Llama-8B", token = access_token), AutoTokenizer.from_pretrained("tarun7r/Finance-Llama-8B", token = access_token), 'tarun7r/Finance-Llama-8B')}
 
-#models = dev_model_configs.keys()
+models = dev_model_configs.keys()
 
-models = ['tarun7r/Finance-Llama-8B', 'ContactDoctor/Bio-Medical-Llama-3-8B']
-# tokenizer = AutoTokenizer.from_pretrained("tarun7r/Finance-Llama-8B")
-# model = AutoModelForCausalLM.from_pretrained("tarun7r/Finance-Llama-8B", device_map="auto")
 torch_device = torch.device("cuda")
 
 
 
 for model_name in tqdm.tqdm(models):
     print('Loading {}'.format(model_name))
-    #model, tokeniser = load_model(model_name)
-    tokeniser = AutoTokenizer.from_pretrained(model_name, token = access_token)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        token = access_token,
-        torch_dtype=torch.float16,  # Half precision
-        device_map="auto",          # Automatic device placement
-        low_cpu_mem_usage=True,     # Efficient CPU memory usage during loading
-        trust_remote_code=True
-    )
+    model, tokeniser = load_model(model_name)
+
     print("Model loaded successfully")
     model.eval()
     if tokeniser.pad_token is None:
@@ -303,9 +320,6 @@ for model_name in tqdm.tqdm(models):
         else:
             tokeniser.add_special_tokens({'pad_token': '<pad>'})
 
-        #unpack_dict = lambda x: (x['input_ids'], x['attention_mask'])
-
-        
     layers = range(1, model.config.num_hidden_layers + 1)
 
     layers = [x for x in layers if x in range(1, model.config.num_hidden_layers + 1)]
@@ -320,7 +334,7 @@ for model_name in tqdm.tqdm(models):
     sentence_c_primes_embs = []
 
     
-    if model_name in ['google/multiberts-seed_3', 'FacebookAI/roberta-base', 'dmis-lab/biobert-base-cased-v1.2']:
+    if model_name in ['google/multiberts-seed_3', 'FacebookAI/roberta-base', 'dmis-lab/biobert-base-cased-v1.2', 'marcev/financebert']:
         print(f'Extracting mean token embeddings for {model_name}')
         for i in range(len(sentence_a_embeddings)):
             sent_a = sentence_a_embeddings[i]

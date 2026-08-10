@@ -292,19 +292,20 @@ targets = []
 targets_primes = []
 
 for i in range(len(abbr_dataset)):
-    sentence_a_embeddings.append(remove_punctuation(abbr_dataset.iloc[i]['sentence_a']))
-    sentence_b_embeddings.append(remove_punctuation(abbr_dataset.iloc[i]['sentence_b']))
-    sentence_c_embeddings.append(remove_punctuation(abbr_dataset.iloc[i]['sentence_c']))
+    sentence_a_embeddings.append((abbr_dataset.iloc[i]['sentence_a']))
+    sentence_b_embeddings.append((abbr_dataset.iloc[i]['sentence_b']))
+    sentence_c_embeddings.append((abbr_dataset.iloc[i]['sentence_c']))
     abbrs.append(abbr_dataset.iloc[i]['abbr'])
     targets.append(abbr_dataset.iloc[i]['target'])
-    sentence_a_primes.append(remove_punctuation(abbr_dataset.iloc[i]['sentence_a_prime']))
-    sentence_b_primes.append(remove_punctuation(abbr_dataset.iloc[i]['sentence_b_prime']))
-    sentence_c_primes.append(remove_punctuation(abbr_dataset.iloc[i]['sentence_c_prime']))
+    sentence_a_primes.append((abbr_dataset.iloc[i]['sentence_a_prime']))
+    sentence_b_primes.append((abbr_dataset.iloc[i]['sentence_b_prime']))
+    sentence_c_primes.append((abbr_dataset.iloc[i]['sentence_c_prime']))
     targets_primes.append(abbr_dataset.iloc[i]['target_prime'])
  
 
 
-### MODELS ###
+## MODELS 
+
 
 dev_model_configs = {'meta-llama/Llama-3.2-3B' : (AutoConfig.from_pretrained("meta-llama/Llama-3.2-3B", token = access_token), AutoModelForCausalLM.from_pretrained("meta-llama/Llama-3.2-3B", token = access_token), AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-3B", token = access_token) , 'meta-llama/Llama-3.2-3B'),
                     'microsoft/biogpt' : (AutoConfig.from_pretrained("microsoft/biogpt", token = access_token), AutoModelForCausalLM.from_pretrained("microsoft/biogpt", token = access_token), AutoTokenizer.from_pretrained("microsoft/biogpt", token = access_token), 'microsoft/biogpt'),

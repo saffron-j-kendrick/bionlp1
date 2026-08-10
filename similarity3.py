@@ -246,14 +246,14 @@ targets = []
 targets_primes = []
 
 for i in range(len(abbr_dataset)):
-    sentence_a_embeddings.append(abbr_dataset.iloc[i]['sentence_a'])
-    sentence_b_embeddings.append(abbr_dataset.iloc[i]['sentence_b'])
-    sentence_c_embeddings.append(abbr_dataset.iloc[i]['sentence_c'])
+    sentence_a_embeddings.append(remove_punctuation(abbr_dataset.iloc[i]['sentence_a']))
+    sentence_b_embeddings.append(remove_punctuation(abbr_dataset.iloc[i]['sentence_b']))
+    sentence_c_embeddings.append(remove_punctuation(abbr_dataset.iloc[i]['sentence_c']))
     abbrs.append(abbr_dataset.iloc[i]['abbr'])
     targets.append(abbr_dataset.iloc[i]['target'])
-    sentence_a_primes.append(abbr_dataset.iloc[i]['sentence_a_prime'])
-    sentence_b_primes.append(abbr_dataset.iloc[i]['sentence_b_prime'])
-    sentence_c_primes.append(abbr_dataset.iloc[i]['sentence_c_prime'])
+    sentence_a_primes.append(remove_punctuation(abbr_dataset.iloc[i]['sentence_a_prime']))
+    sentence_b_primes.append(remove_punctuation(abbr_dataset.iloc[i]['sentence_b_prime']))
+    sentence_c_primes.append(remove_punctuation(abbr_dataset.iloc[i]['sentence_c_prime']))
     targets_primes.append(abbr_dataset.iloc[i]['target_prime'])
  
 
@@ -276,7 +276,7 @@ for i in range(len(abbr_dataset)):
 
 #models = dev_model_configs.keys()
 
-models = ['tarun7r/Finance-Llama-8B', 'ContactDoctor/Bio-Medical-Llama-3-8B']
+models = ['tarun7r/Finance-Llama-8B', 'ContactDoctor/Bio-Medical-Llama-3-8B', 'meta-llama/Llama-3.2-3B']
 # tokenizer = AutoTokenizer.from_pretrained("tarun7r/Finance-Llama-8B")
 # model = AutoModelForCausalLM.from_pretrained("tarun7r/Finance-Llama-8B", device_map="auto")
 torch_device = torch.device("cuda")
@@ -426,22 +426,24 @@ for model_name in tqdm.tqdm(models):
     CosSim_13 = []
     CosSim_23 = []
 
+    Euclidean_12 = []
+    Euclidean_13 = []
+    Euclidean_23 = []
+
     CosSim_12_primes = []
     CosSim_13_primes = []
     CosSim_23_primes = []
 
-    PearsonCorr_12 = []
-    PearsonCorr_13 = []
-    PearsonCorr_23 = []
-
-    PearsonCorr_12_primes = []
-    PearsonCorr_13_primes = []
-    PearsonCorr_23_primes = []
-   
+    Euclidean_12_primes = []
+    Euclidean_13_primes = []
+    Euclidean_23_primes = []
+  
 
     for layer_idx in range(len(layers)):
         sims_12, sims_13, sims_23 = [], [], []
         sims_12_primes, sims_13_primes, sims_23_primes = [], [], []
+        euclidean_12, euclidean_13, euclidean_23 = [], [], []
+        euclidean_12_primes, euclidean_13_primes, euclidean_23_primes = [], [], []
         for sent_idx in range(len(sentence_a_embs)):
             emb_a = sentence_a_embs[sent_idx][layer_idx]  # shape (1, hidden_size)
             emb_b = sentence_b_embs[sent_idx][layer_idx]
@@ -449,36 +451,45 @@ for model_name in tqdm.tqdm(models):
             emb_a_prime = sentence_a_primes_embs[sent_idx][layer_idx]
             emb_b_prime = sentence_b_primes_embs[sent_idx][layer_idx]
             emb_c_prime = sentence_c_primes_embs[sent_idx][layer_idx]
-            sims_12.append(cosine_similarity(emb_a, emb_b)[0][0])
-            sims_13.append(cosine_similarity(emb_a, emb_c)[0][0])
-            sims_23.append(cosine_similarity(emb_b, emb_c)[0][0])
-            sims_12_primes.append(cosine_similarity(emb_a_prime, emb_b_prime)[0][0])
-            sims_13_primes.append(cosine_similarity(emb_a_prime, emb_c_prime)[0][0])
-            sims_23_primes.append(cosine_similarity(emb_b_prime, emb_c_prime)[0][0])
-        
+            sims_12.append(cosine_similarity(emb_a, emb_b)[0][0] - cosine_similarity(emb_a, emb_c)[0][0])
+            sims_12_primes.append(cosine_similarity(emb_a_prime, emb_b_prime)[0][0] - cosine_similarity(emb_a_prime, emb_c_prime)[0][0])
+
+            def _norm(v):
+                n = np.linalg.norm(v)
+                return v / n if n > 0 else v
+
+            euclidean_12.append(np.linalg.norm(_norm(emb_a) - _norm(emb_b)) - np.linalg.norm(_norm(emb_a) - _norm(emb_c)))
+            euclidean_12_primes.append(np.linalg.norm(_norm(emb_a_prime) - _norm(emb_b_prime)) - np.linalg.norm(_norm(emb_a_prime) - _norm(emb_c_prime)))
     
         CosSim_12.append(np.mean(sims_12))
-        CosSim_13.append(np.mean(sims_13))
-        CosSim_23.append(np.mean(sims_23))
         CosSim_12_primes.append(np.mean(sims_12_primes))
-        CosSim_13_primes.append(np.mean(sims_13_primes))
-        CosSim_23_primes.append(np.mean(sims_23_primes))
+        Euclidean_12.append(np.mean(euclidean_12))
+        Euclidean_12_primes.append(np.mean(euclidean_12_primes))
 
-
+    # #save
+    # model_name_save = model_name.replace('/', '_')
+    # np.save(f'data/CosSim_12_{model_name_save}_test_with_primes.npy', CosSim_12)
+    # np.save(f'data/CosSim_13_{model_name_save}_test_with_primes.npy', CosSim_13)
+    # np.save(f'data/CosSim_23_{model_name_save}_test_with_primes.npy', CosSim_23)
+    # np.save(f'data/CosSim_12_primes_{model_name_save}_test_with_primes.npy', CosSim_12_primes)
+    # np.save(f'data/CosSim_13_primes_{model_name_save}_test_with_primes.npy', CosSim_13_primes)
+    # np.save(f'data/CosSim_23_primes_{model_name_save}_test_with_primes.npy', CosSim_23_primes)
+    # np.save(f'data/Euclidean_12_{model_name_save}_test_with_primes.npy', Euclidean_12)
+    # np.save(f'data/Euclidean_13_{model_name_save}_test_with_primes.npy', Euclidean_13)
+    # np.save(f'data/Euclidean_23_{model_name_save}_test_with_primes.npy', Euclidean_23)
+    # np.save(f'data/Euclidean_12_primes_{model_name_save}_test_with_primes.npy', Euclidean_12_primes)
+    # np.save(f'data/Euclidean_13_primes_{model_name_save}_test_with_primes.npy', Euclidean_13_primes)
+    # np.save(f'data/Euclidean_23_primes_{model_name_save}_test_with_primes.npy', Euclidean_23_primes)
     # subplot three lines, cossims and then primes
     model_name = model_name_map[model_name]
 
     fig, axes = plt.subplots(1, 2, figsize=(ACL_TEXT_WIDTH, ACL_SINGLE_HEIGHT), sharey=True)
 
-    axes[0].plot(CosSim_12, label='S1–S2')
-    axes[0].plot(CosSim_13, label='S1–S3')
-    axes[0].plot(CosSim_23, label='S2–S3')
+    axes[0].plot(CosSim_12, label='<S1–S2> - <S1–S3>')
     axes[0].set_title('Original')
     axes[0].legend(loc='best')
 
-    axes[1].plot(CosSim_12_primes, label="S1' - S2'")
-    axes[1].plot(CosSim_13_primes, label="S1' - S3'")
-    axes[1].plot(CosSim_23_primes, label="S2' - S3'")
+    axes[1].plot(CosSim_12_primes, label="<S1'–S2'> - <S1'–S3'>")
     axes[1].set_title('Primes')
     axes[1].legend(loc='best')
 
@@ -487,26 +498,77 @@ for model_name in tqdm.tqdm(models):
     fig.suptitle(f'Average Cosine Similarity for {model_name}')
     fig.tight_layout(rect=[0.04, 0.04, 1.0, 0.93])
 
-    fig.savefig(f'figures/CosineSimilarityFinalTokenEmbeddings_{model_name}_test_with_primes.png')
-    fig.savefig(f'figures/CosineSimilarityFinalTokenEmbeddings_{model_name}_test_with_primes.eps')
-    fig.savefig(f'figures/CosineSimilarityFinalTokenEmbeddings_{model_name}_test_with_primes.pdf')
+    fig.savefig(f'figures/CosineSimilarityFinalTokenEmbeddings_{model_name}_test_with_primes_difference.png')
+    fig.savefig(f'figures/CosineSimilarityFinalTokenEmbeddings_{model_name}_test_with_primes_difference.eps')
+    fig.savefig(f'figures/CosineSimilarityFinalTokenEmbeddings_{model_name}_test_with_primes_difference.pdf')
     plt.show()
     plt.close(fig)
 
-    # plt.plot(CosSim_12, label='Pair: Sentence 1 and Sentence 2')
-    # plt.plot(CosSim_13, label='Pair: Sentence 1 and Sentence 3')
-    # plt.plot(CosSim_23, label='Pair: Sentence 2 and Sentence 3')
-    # plt.xlabel('Layer')
-    # plt.ylabel('Average Cosine Similarity')
-    # if model_name in ['MultiBERTs', 'RoBERTa', 'BioBERT']:
-    #     plt.title(f'Average Cosine Similarity using the mean token embeddings for {model_name}')
-    # else:
-    #     plt.title(f'Average Cosine Similarity using the target token embeddings for {model_name}')
-    # plt.legend()
-    # plt.savefig(f'figures/CosineSimilarityFinalTokenEmbeddings_{model_name}_test.png')
-    # plt.savefig(f'figures/CosineSimilarityFinalTokenEmbeddings_{model_name}_test.eps')
-    # plt.savefig(f'figures/CosineSimilarityFinalTokenEmbeddings_{model_name}_test.pdf')
-    # plt.show()
-    # plt.close()
+    fig, axes = plt.subplots(1, 2, figsize=(ACL_TEXT_WIDTH, ACL_SINGLE_HEIGHT), sharey=True)
 
-  
+    axes[0].plot(Euclidean_12, label='<S1–S2> - <S1–S3>')
+    axes[0].set_title('Original')
+    axes[0].legend(loc='best')
+
+    axes[1].plot(Euclidean_12_primes, label="<S1'–S2'> - <S1'–S3'>")
+    axes[1].set_title('Primes')
+    axes[1].legend(loc='best')
+
+    fig.supxlabel('Layer')
+    fig.supylabel('Average Euclidean Distance')
+    fig.suptitle(f'Average Normalised Euclidean Distance for {model_name}')
+    fig.tight_layout(rect=[0.04, 0.04, 1.0, 0.93])
+
+    fig.savefig(f'figures/EuclideanDistanceFinalTokenEmbeddings_{model_name}_test_with_primes_difference.png')
+    fig.savefig(f'figures/EuclideanDistanceFinalTokenEmbeddings_{model_name}_test_with_primes_difference.eps')
+    fig.savefig(f'figures/EuclideanDistanceFinalTokenEmbeddings_{model_name}_test_with_primes_difference.pdf')
+    plt.show()
+    plt.close(fig)
+
+
+
+
+
+# # compare the cosine similarity and euclidean distance for the original and primes for llama
+
+# CosSim_12_finance = np.load(f'data/CosSim_12_tarun7r_Finance-Llama-8B_test_with_primes.npy')
+# CosSim_12_bio = np.load(f'data/CosSim_12_ContactDoctor_Bio-Medical-Llama-3-8B_test_with_primes.npy')
+# CosSim_12_llama = np.load(f'data/CosSim_12_meta-llama_Llama-3.2-3B_test_with_primes.npy')
+
+# Euclidean_12_finance = np.load(f'data/Euclidean_12_tarun7r_Finance-Llama-8B_test_with_primes.npy')
+# Euclidean_12_bio = np.load(f'data/Euclidean_12_ContactDoctor_Bio-Medical-Llama-3-8B_test_with_primes.npy')
+# Euclidean_12_llama = np.load(f'data/Euclidean_12_meta-llama_Llama-3.2-3B_test_with_primes.npy')
+
+# # plot
+
+# fig, axes = plt.subplots(1, 2, figsize=(ACL_TEXT_WIDTH, ACL_SINGLE_HEIGHT), sharey=True)
+
+# axes[0].plot(CosSim_12_finance, label="Finance-Llama-8B", color='deepskyblue')
+# axes[0].plot(CosSim_12_bio, label="Bio-Medical-Llama-3-8B", color='mediumpurple')
+# axes[0].plot(CosSim_12_llama, label="Llama-3.2-3B", color='chartreuse')
+# axes[0].set_title('Cosine Similarity')
+# axes[0].yaxis.set_label_position('left')
+# axes[0].yaxis.tick_left()
+# axes[0].set_ylabel('Cosine Similarity')
+# axes[0].legend(loc='best')
+
+# axes[1].plot(Euclidean_12_finance, label="Finance-Llama-8B", color='deepskyblue')
+# axes[1].plot(Euclidean_12_bio, label="Bio-Medical-Llama-3-8B", color='mediumpurple')
+# axes[1].plot(Euclidean_12_llama, label="Llama-3.2-3B", color='chartreuse')
+# axes[1].set_title('Euclidean Distance')
+# axes[1].legend(loc='best')
+# axes[1].yaxis.set_label_position('right')
+# axes[1].yaxis.tick_right()
+# axes[1].set_ylabel('Euclidean Distance')
+
+# fig.supxlabel('Layer')
+
+# fig.suptitle('Cosine Similarity and Euclidean Distance for Original and Primes')
+# fig.tight_layout(rect=[0.04, 0.04, 1.0, 0.93])
+
+# fig.savefig(f'figures/CosineSimilarityAndEuclideanDistanceForOriginalAndPrimes.png')
+# fig.savefig(f'figures/CosineSimilarityAndEuclideanDistanceForOriginalAndPrimes.eps')
+# fig.savefig(f'figures/CosineSimilarityAndEuclideanDistanceForOriginalAndPrimes.pdf')
+# plt.show()
+# plt.close(fig)
+

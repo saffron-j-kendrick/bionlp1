@@ -280,7 +280,7 @@ def get_mean_token_embeddings(model_name, model, tokeniser, input_ids, attention
 ## SENTENCES 
 
 
-abbr_dataset = pd.read_excel("triple_sentence_test_with_primes.xlsx")
+abbr_dataset = pd.read_csv("adam_sentences_filtered_with_targets.csv")
 sentence_a_embeddings = []
 sentence_a_primes = []
 sentence_b_embeddings = []

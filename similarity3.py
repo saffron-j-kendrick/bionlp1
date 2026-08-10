@@ -234,7 +234,7 @@ def get_mean_token_embeddings(model_name, model, tokeniser, input_ids, attention
 ## SENTENCES 
 
 
-abbr_dataset = pd.read_excel("triple_sentence_test_with_primes.xlsx")
+abbr_dataset = pd.read_csv("adam_sentences_filtered_with_targets.csv")
 sentence_a_embeddings = []
 sentence_a_primes = []
 sentence_b_embeddings = []
@@ -246,14 +246,14 @@ targets = []
 targets_primes = []
 
 for i in range(len(abbr_dataset)):
-    sentence_a_embeddings.append((abbr_dataset.iloc[i]['sentence_a']))
-    sentence_b_embeddings.append((abbr_dataset.iloc[i]['sentence_b']))
-    sentence_c_embeddings.append((abbr_dataset.iloc[i]['sentence_c']))
-    abbrs.append(abbr_dataset.iloc[i]['abbr'])
+    sentence_a_embeddings.append((abbr_dataset.iloc[i]['Sentence_A']))
+    sentence_b_embeddings.append((abbr_dataset.iloc[i]['Sentence_B']))
+    sentence_c_embeddings.append((abbr_dataset.iloc[i]['Sentence_C']))
+    abbrs.append(abbr_dataset.iloc[i]['ABBR'])
     targets.append(abbr_dataset.iloc[i]['target'])
-    sentence_a_primes.append((abbr_dataset.iloc[i]['sentence_a_prime']))
-    sentence_b_primes.append((abbr_dataset.iloc[i]['sentence_b_prime']))
-    sentence_c_primes.append((abbr_dataset.iloc[i]['sentence_c_prime']))
+    sentence_a_primes.append((abbr_dataset.iloc[i]['Sentence_A_Prime']))
+    sentence_b_primes.append((abbr_dataset.iloc[i]['Sentence_B_Prime']))
+    sentence_c_primes.append((abbr_dataset.iloc[i]['Sentence_C_Prime']))
     targets_primes.append(abbr_dataset.iloc[i]['target_prime'])
  
 
@@ -272,11 +272,16 @@ for i in range(len(abbr_dataset)):
 #                     'FacebookAI/roberta-base' : (AutoConfig.from_pretrained("FacebookAI/roberta-base"), AutoModelForMaskedLM.from_pretrained("FacebookAI/roberta-base"), AutoTokenizer.from_pretrained("FacebookAI/roberta-base"), 'FacebookAI/roberta-base'),
 #                     'dmis-lab/biobert-base-cased-v1.2' : (AutoConfig.from_pretrained("dmis-lab/biobert-base-cased-v1.2"), AutoModelForMaskedLM.from_pretrained("dmis-lab/biobert-base-cased-v1.2"), AutoTokenizer.from_pretrained("dmis-lab/biobert-base-cased-v1.2"), 'dmis-lab/biobert-base-cased-v1.2')}
 
-#dev_model_configs = {'tarun7r/Finance-Llama-8B' : (AutoConfig.from_pretrained("tarun7r/Finance-Llama-8B", token = access_token), AutoModelForCausalLM.from_pretrained("tarun7r/Finance-Llama-8B", token = access_token), AutoTokenizer.from_pretrained("tarun7r/Finance-Llama-8B", token = access_token), 'tarun7r/Finance-Llama-8B')}
+dev_model_configs = {'meta-llama/Llama-3.2-3B' : (AutoConfig.from_pretrained("meta-llama/Llama-3.2-3B", token = access_token), AutoModelForCausalLM.from_pretrained("meta-llama/Llama-3.2-3B", token = access_token), AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-3B", token = access_token) , 'meta-llama/Llama-3.2-3B'),
+                     'ContactDoctor/Bio-Medical-Llama-3-8B' : (AutoConfig.from_pretrained("ContactDoctor/Bio-Medical-Llama-3-8B", token = access_token), AutoModelForCausalLM.from_pretrained("ContactDoctor/Bio-Medical-Llama-3-8B", token = access_token), AutoTokenizer.from_pretrained("ContactDoctor/Bio-Medical-Llama-3-8B", token = access_token), 'ContactDoctor/Bio-Medical-Llama-3-8B'),
+                     'tarun7r/Finance-Llama-8B' : (AutoConfig.from_pretrained("tarun7r/Finance-Llama-8B", token = access_token), AutoModelForCausalLM.from_pretrained("tarun7r/Finance-Llama-8B", token = access_token), AutoTokenizer.from_pretrained("tarun7r/Finance-Llama-8B", token = access_token), 'tarun7r/Finance-Llama-8B'),
+                    'google/multiberts-seed_3' : (AutoConfig.from_pretrained("google/multiberts-seed_3"), AutoModelForMaskedLM.from_pretrained("google/multiberts-seed_3"), AutoTokenizer.from_pretrained("google/multiberts-seed_3"), 'google/multiberts-seed_3'),
+                    'marcev/financebert' : (AutoConfig.from_pretrained("marcev/financebert"), AutoModelForMaskedLM.from_pretrained("marcev/financebert"), AutoTokenizer.from_pretrained("marcev/financebert"), 'marcev/financebert'),
+                    'dmis-lab/biobert-base-cased-v1.2' : (AutoConfig.from_pretrained("dmis-lab/biobert-base-cased-v1.2"), AutoModelForMaskedLM.from_pretrained("dmis-lab/biobert-base-cased-v1.2"), AutoTokenizer.from_pretrained("dmis-lab/biobert-base-cased-v1.2"), 'dmis-lab/biobert-base-cased-v1.2')}
 
-#models = dev_model_configs.keys()
+models = dev_model_configs.keys()
 
-models = ['tarun7r/Finance-Llama-8B', 'ContactDoctor/Bio-Medical-Llama-3-8B', 'meta-llama/Llama-3.2-3B']
+# models = ['tarun7r/Finance-Llama-8B', 'ContactDoctor/Bio-Medical-Llama-3-8B', 'meta-llama/Llama-3.2-3B']
 # tokenizer = AutoTokenizer.from_pretrained("tarun7r/Finance-Llama-8B")
 # model = AutoModelForCausalLM.from_pretrained("tarun7r/Finance-Llama-8B", device_map="auto")
 torch_device = torch.device("cuda")
@@ -286,15 +291,19 @@ torch_device = torch.device("cuda")
 for model_name in tqdm.tqdm(models):
     print('Loading {}'.format(model_name))
     #model, tokeniser = load_model(model_name)
-    tokeniser = AutoTokenizer.from_pretrained(model_name, token = access_token)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        token = access_token,
-        torch_dtype=torch.float16,  # Half precision
-        device_map="auto",          # Automatic device placement
-        low_cpu_mem_usage=True,     # Efficient CPU memory usage during loading
-        trust_remote_code=True
-    )
+
+    if model_name in ['ContactDoctor/Bio-Medical-Llama-3-8B', 'tarun7r/Finance-Llama-8B']:
+        tokeniser = AutoTokenizer.from_pretrained(model_name, token = access_token)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            token = access_token,
+            torch_dtype=torch.float16,  # Half precision
+            device_map="auto",          # Automatic device placement
+            low_cpu_mem_usage=True,     # Efficient CPU memory usage during loading
+            trust_remote_code=True
+        )
+    else:
+        model, tokeniser = load_model(model_name)
     print("Model loaded successfully")
     model.eval()
     if tokeniser.pad_token is None:

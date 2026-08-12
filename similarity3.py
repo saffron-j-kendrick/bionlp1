@@ -58,7 +58,7 @@ if access_token is None:
     raise ValueError("HF_TOKEN is not set")
 
 
-model_name_map = {'meta-llama/Llama-3.2-3B' : 'Llama', "openai-community/gpt2" : "GPT2", "tiiuae/Falcon3-7B-Base" : "Falcon", "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B" : "DeepSeek", "Qwen/Qwen2.5-7B" : "Qwen", "mistralai/Mistral-7B-v0.1" : "Mistral", "microsoft/biogpt" : "BioGPT", "google/multiberts-seed_3" : "MultiBERTs", "FacebookAI/roberta-base" : "RoBERTa", "dmis-lab/biobert-base-cased-v1.2" : "BioBERT", "ContactDoctor/Bio-Medical-Llama-3-8B" : "Bio-Medical-Llama", "tarun7r/Finance-Llama-8B" : "Finance-Llama"}
+model_name_map = {'meta-llama/Llama-3.2-3B' : 'Llama-3B', "openai-community/gpt2" : "GPT2", "tiiuae/Falcon3-7B-Base" : "Falcon", "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B" : "DeepSeek", "Qwen/Qwen2.5-7B" : "Qwen", "mistralai/Mistral-7B-v0.1" : "Mistral", "microsoft/biogpt" : "BioGPT", "google/multiberts-seed_3" : "MultiBERTs", "FacebookAI/roberta-base" : "RoBERTa", "dmis-lab/biobert-base-cased-v1.2" : "BioBERT", "ContactDoctor/Bio-Medical-Llama-3-8B" : "Bio-Medical-Llama", "tarun7r/Finance-Llama-8B" : "Finance-Llama", "marcev/financebert" : "FinanceBERT", "meta-llama/Meta-Llama-3-8B" : "Llama"}
 
 
 ## FUNCTIONS
@@ -154,7 +154,7 @@ def get_target_token_embeddings(model_name, model, tokeniser, input_ids, attenti
                     layer_reps = token_reps[1][layer].cpu()[:, :, :]
                 elif layer == model.config.num_hidden_layers:
                     layer_reps = token_reps[0].cpu()[:, :, :]
-                elif model_name in ['meta-llama/Llama-3.2-1B', 'microsoft/phi-1', 'openai-community/gpt2', 'microsoft/biogpt', 'medicalai/ClinicalGPT-base-zh', 'meta-llama/Llama-3.2-3B', "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B", "Qwen/Qwen2.5-7B", "mistralai/Mistral-7B-v0.1", "tiiuae/Falcon3-7B-Base", 'google/multiberts-seed_3', 'FacebookAI/roberta-base', 'dmis-lab/biobert-base-cased-v1.2', 'ContactDoctor/Bio-Medical-Llama-3-8B', 'tarun7r/Finance-Llama-8B']:
+                elif model_name in ['meta-llama/Llama-3.2-1B', 'microsoft/phi-1', 'openai-community/gpt2', 'microsoft/biogpt', 'medicalai/ClinicalGPT-base-zh', 'meta-llama/Llama-3.2-3B', "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B", "Qwen/Qwen2.5-7B", "mistralai/Mistral-7B-v0.1", "tiiuae/Falcon3-7B-Base", 'google/multiberts-seed_3', 'FacebookAI/roberta-base', 'dmis-lab/biobert-base-cased-v1.2', 'ContactDoctor/Bio-Medical-Llama-3-8B', 'tarun7r/Finance-Llama-8B', 'marcev/financebert', 'meta-llama/Meta-Llama-3-8B']:
                     layer_reps = token_reps[layer].cpu()[:, :, :]
                 else:
                     layer_reps = token_reps[2][layer].cpu()[:, :, :]
@@ -220,7 +220,7 @@ def get_mean_token_embeddings(model_name, model, tokeniser, input_ids, attention
                     layer_reps = token_reps[1][layer].cpu()[:, :, :]
                 elif layer == model.config.num_hidden_layers:
                     layer_reps = token_reps[0].cpu()[:, :, :]
-                elif model_name in ['meta-llama/Llama-3.2-1B', 'microsoft/phi-1', 'openai-community/gpt2', 'microsoft/biogpt', 'medicalai/ClinicalGPT-base-zh', 'meta-llama/Llama-3.2-3B', "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B", "Qwen/Qwen2.5-7B", "mistralai/Mistral-7B-v0.1", "tiiuae/Falcon3-7B-Base", 'google/multiberts-seed_3', 'FacebookAI/roberta-base', 'dmis-lab/biobert-base-cased-v1.2', 'ContactDoctor/Bio-Medical-Llama-3-8B', 'tarun7r/Finance-Llama-8B']:
+                elif model_name in ['meta-llama/Llama-3.2-1B', 'microsoft/phi-1', 'openai-community/gpt2', 'microsoft/biogpt', 'medicalai/ClinicalGPT-base-zh', 'meta-llama/Llama-3.2-3B', "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B", "Qwen/Qwen2.5-7B", "mistralai/Mistral-7B-v0.1", "tiiuae/Falcon3-7B-Base", 'google/multiberts-seed_3', 'FacebookAI/roberta-base', 'dmis-lab/biobert-base-cased-v1.2', 'ContactDoctor/Bio-Medical-Llama-3-8B', 'tarun7r/Finance-Llama-8B', 'marcev/financebert', 'meta-llama/Meta-Llama-3-8B']:
                     layer_reps = token_reps[layer].cpu()[:, :, :]
                 else:
                     layer_reps = token_reps[2][layer].cpu()[:, :, :]
@@ -272,12 +272,21 @@ for i in range(len(abbr_dataset)):
 #                     'FacebookAI/roberta-base' : (AutoConfig.from_pretrained("FacebookAI/roberta-base"), AutoModelForMaskedLM.from_pretrained("FacebookAI/roberta-base"), AutoTokenizer.from_pretrained("FacebookAI/roberta-base"), 'FacebookAI/roberta-base'),
 #                     'dmis-lab/biobert-base-cased-v1.2' : (AutoConfig.from_pretrained("dmis-lab/biobert-base-cased-v1.2"), AutoModelForMaskedLM.from_pretrained("dmis-lab/biobert-base-cased-v1.2"), AutoTokenizer.from_pretrained("dmis-lab/biobert-base-cased-v1.2"), 'dmis-lab/biobert-base-cased-v1.2')}
 
-dev_model_configs = {'meta-llama/Llama-3.2-3B' : (AutoConfig.from_pretrained("meta-llama/Llama-3.2-3B", token = access_token), AutoModelForCausalLM.from_pretrained("meta-llama/Llama-3.2-3B", token = access_token), AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-3B", token = access_token) , 'meta-llama/Llama-3.2-3B'),
+# dev_model_configs = {'meta-llama/Llama-3.2-3B' : (AutoConfig.from_pretrained("meta-llama/Llama-3.2-3B", token = access_token), AutoModelForCausalLM.from_pretrained("meta-llama/Llama-3.2-3B", token = access_token), AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-3B", token = access_token) , 'meta-llama/Llama-3.2-3B'),
+#                      'ContactDoctor/Bio-Medical-Llama-3-8B' : (AutoConfig.from_pretrained("ContactDoctor/Bio-Medical-Llama-3-8B", token = access_token), AutoModelForCausalLM.from_pretrained("ContactDoctor/Bio-Medical-Llama-3-8B", token = access_token), AutoTokenizer.from_pretrained("ContactDoctor/Bio-Medical-Llama-3-8B", token = access_token), 'ContactDoctor/Bio-Medical-Llama-3-8B'),
+#                      'tarun7r/Finance-Llama-8B' : (AutoConfig.from_pretrained("tarun7r/Finance-Llama-8B", token = access_token), AutoModelForCausalLM.from_pretrained("tarun7r/Finance-Llama-8B", token = access_token), AutoTokenizer.from_pretrained("tarun7r/Finance-Llama-8B", token = access_token), 'tarun7r/Finance-Llama-8B'),
+#                     'google/multiberts-seed_3' : (AutoConfig.from_pretrained("google/multiberts-seed_3"), AutoModelForMaskedLM.from_pretrained("google/multiberts-seed_3"), AutoTokenizer.from_pretrained("google/multiberts-seed_3"), 'google/multiberts-seed_3'),
+#                     'marcev/financebert' : (AutoConfig.from_pretrained("marcev/financebert"), AutoModelForMaskedLM.from_pretrained("marcev/financebert"), AutoTokenizer.from_pretrained("marcev/financebert"), 'marcev/financebert'),
+#                     'dmis-lab/biobert-base-cased-v1.2' : (AutoConfig.from_pretrained("dmis-lab/biobert-base-cased-v1.2"), AutoModelForMaskedLM.from_pretrained("dmis-lab/biobert-base-cased-v1.2"), AutoTokenizer.from_pretrained("dmis-lab/biobert-base-cased-v1.2"), 'dmis-lab/biobert-base-cased-v1.2')}
+
+
+dev_model_configs = {'meta-llama/Meta-Llama-3-8B' : (AutoConfig.from_pretrained("meta-llama/Meta-Llama-3-8B", token = access_token), AutoModelForCausalLM.from_pretrained("meta-llama/Meta-Llama-3-8B", token = access_token), AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3-8B", token = access_token) , 'meta-llama/Meta-Llama-3-8B'),
                      'ContactDoctor/Bio-Medical-Llama-3-8B' : (AutoConfig.from_pretrained("ContactDoctor/Bio-Medical-Llama-3-8B", token = access_token), AutoModelForCausalLM.from_pretrained("ContactDoctor/Bio-Medical-Llama-3-8B", token = access_token), AutoTokenizer.from_pretrained("ContactDoctor/Bio-Medical-Llama-3-8B", token = access_token), 'ContactDoctor/Bio-Medical-Llama-3-8B'),
                      'tarun7r/Finance-Llama-8B' : (AutoConfig.from_pretrained("tarun7r/Finance-Llama-8B", token = access_token), AutoModelForCausalLM.from_pretrained("tarun7r/Finance-Llama-8B", token = access_token), AutoTokenizer.from_pretrained("tarun7r/Finance-Llama-8B", token = access_token), 'tarun7r/Finance-Llama-8B'),
                     'google/multiberts-seed_3' : (AutoConfig.from_pretrained("google/multiberts-seed_3"), AutoModelForMaskedLM.from_pretrained("google/multiberts-seed_3"), AutoTokenizer.from_pretrained("google/multiberts-seed_3"), 'google/multiberts-seed_3'),
                     'marcev/financebert' : (AutoConfig.from_pretrained("marcev/financebert"), AutoModelForMaskedLM.from_pretrained("marcev/financebert"), AutoTokenizer.from_pretrained("marcev/financebert"), 'marcev/financebert'),
                     'dmis-lab/biobert-base-cased-v1.2' : (AutoConfig.from_pretrained("dmis-lab/biobert-base-cased-v1.2"), AutoModelForMaskedLM.from_pretrained("dmis-lab/biobert-base-cased-v1.2"), AutoTokenizer.from_pretrained("dmis-lab/biobert-base-cased-v1.2"), 'dmis-lab/biobert-base-cased-v1.2')}
+
 
 models = dev_model_configs.keys()
 
@@ -329,7 +338,7 @@ for model_name in tqdm.tqdm(models):
     sentence_c_primes_embs = []
 
     
-    if model_name in ['google/multiberts-seed_3', 'FacebookAI/roberta-base', 'dmis-lab/biobert-base-cased-v1.2']:
+    if model_name in ['google/multiberts-seed_3', 'FacebookAI/roberta-base', 'dmis-lab/biobert-base-cased-v1.2', 'marcev/financebert']:
         print(f'Extracting mean token embeddings for {model_name}')
         for i in range(len(sentence_a_embeddings)):
             sent_a = sentence_a_embeddings[i]
@@ -442,7 +451,8 @@ for model_name in tqdm.tqdm(models):
     CosSim_12_primes = []
     CosSim_13_primes = []
     CosSim_23_primes = []
-
+    CosSim_12_diff = []
+    CosSim_12_primes_diff = []
     Euclidean_12_primes = []
     Euclidean_13_primes = []
     Euclidean_23_primes = []
@@ -451,6 +461,7 @@ for model_name in tqdm.tqdm(models):
     for layer_idx in range(len(layers)):
         sims_12, sims_13, sims_23 = [], [], []
         sims_12_primes, sims_13_primes, sims_23_primes = [], [], []
+        sim_diff, sim_diff_primes = [], []
         euclidean_12, euclidean_13, euclidean_23 = [], [], []
         euclidean_12_primes, euclidean_13_primes, euclidean_23_primes = [], [], []
         for sent_idx in range(len(sentence_a_embs)):
@@ -462,6 +473,8 @@ for model_name in tqdm.tqdm(models):
             emb_c_prime = sentence_c_primes_embs[sent_idx][layer_idx]
             sims_12.append(cosine_similarity(emb_a, emb_b)[0][0] - cosine_similarity(emb_a, emb_c)[0][0])
             sims_12_primes.append(cosine_similarity(emb_a_prime, emb_b_prime)[0][0] - cosine_similarity(emb_a_prime, emb_c_prime)[0][0])
+            sim_diff.append(cosine_similarity(emb_a, emb_b)[0][0] - cosine_similarity(emb_a, emb_c)[0][0] - cosine_similarity(emb_b, emb_c)[0][0])
+            sim_diff_primes.append(cosine_similarity(emb_a_prime, emb_b_prime)[0][0] - cosine_similarity(emb_a_prime, emb_c_prime)[0][0] - cosine_similarity(emb_b_prime, emb_c_prime)[0][0])
 
             def _norm(v):
                 n = np.linalg.norm(v)
@@ -472,17 +485,21 @@ for model_name in tqdm.tqdm(models):
     
         CosSim_12.append(np.mean(sims_12))
         CosSim_12_primes.append(np.mean(sims_12_primes))
+        CosSim_12_diff.append(np.mean(sim_diff))
+        CosSim_12_primes_diff.append(np.mean(sim_diff_primes))
         Euclidean_12.append(np.mean(euclidean_12))
         Euclidean_12_primes.append(np.mean(euclidean_12_primes))
 
-    # #save
-    # model_name_save = model_name.replace('/', '_')
-    # np.save(f'data/CosSim_12_{model_name_save}_test_with_primes.npy', CosSim_12)
-    # np.save(f'data/CosSim_13_{model_name_save}_test_with_primes.npy', CosSim_13)
-    # np.save(f'data/CosSim_23_{model_name_save}_test_with_primes.npy', CosSim_23)
-    # np.save(f'data/CosSim_12_primes_{model_name_save}_test_with_primes.npy', CosSim_12_primes)
-    # np.save(f'data/CosSim_13_primes_{model_name_save}_test_with_primes.npy', CosSim_13_primes)
-    # np.save(f'data/CosSim_23_primes_{model_name_save}_test_with_primes.npy', CosSim_23_primes)
+    #save
+    model_name_save = model_name.replace('/', '_')
+    np.save(f'data/CosSim_12_{model_name_save}_test_with_difference.npy', CosSim_12)
+    np.save(f'data/CosSim_13_{model_name_save}_test_with_difference.npy', CosSim_13)
+    np.save(f'data/CosSim_23_{model_name_save}_test_with_difference.npy', CosSim_23)
+    np.save(f'data/CosSim_12_primes_{model_name_save}_test_with_difference.npy', CosSim_12_primes)
+    np.save(f'data/CosSim_13_primes_{model_name_save}_test_with_difference.npy', CosSim_13_primes)
+    np.save(f'data/CosSim_23_primes_{model_name_save}_test_with_difference.npy', CosSim_23_primes)
+    np.save(f'data/CosSim_12_diff_{model_name_save}_test_with_difference.npy', CosSim_12_diff)
+    np.save(f'data/CosSim_12_primes_diff_{model_name_save}_test_with_difference.npy', CosSim_12_primes_diff)
     # np.save(f'data/Euclidean_12_{model_name_save}_test_with_primes.npy', Euclidean_12)
     # np.save(f'data/Euclidean_13_{model_name_save}_test_with_primes.npy', Euclidean_13)
     # np.save(f'data/Euclidean_23_{model_name_save}_test_with_primes.npy', Euclidean_23)
@@ -494,11 +511,11 @@ for model_name in tqdm.tqdm(models):
 
     fig, axes = plt.subplots(1, 2, figsize=(ACL_TEXT_WIDTH, ACL_SINGLE_HEIGHT), sharey=True)
 
-    axes[0].plot(CosSim_12, label='<S1–S2> - <S1–S3>')
+    axes[0].plot(CosSim_12, label='<SA–SB> - <SA–SC>')
     axes[0].set_title('Original')
     axes[0].legend(loc='best')
 
-    axes[1].plot(CosSim_12_primes, label="<S1'–S2'> - <S1'–S3'>")
+    axes[1].plot(CosSim_12_primes, label="<SA'–SB'> - <SA'–SC'>")
     axes[1].set_title('Primes')
     axes[1].legend(loc='best')
 
@@ -515,11 +532,11 @@ for model_name in tqdm.tqdm(models):
 
     fig, axes = plt.subplots(1, 2, figsize=(ACL_TEXT_WIDTH, ACL_SINGLE_HEIGHT), sharey=True)
 
-    axes[0].plot(Euclidean_12, label='<S1–S2> - <S1–S3>')
+    axes[0].plot(Euclidean_12, label='<SA–SB> - <SA–SC>')
     axes[0].set_title('Original')
     axes[0].legend(loc='best')
 
-    axes[1].plot(Euclidean_12_primes, label="<S1'–S2'> - <S1'–S3'>")
+    axes[1].plot(Euclidean_12_primes, label="<SA'–SB'> - <SA'–SC'>")
     axes[1].set_title('Primes')
     axes[1].legend(loc='best')
 
@@ -533,6 +550,74 @@ for model_name in tqdm.tqdm(models):
     fig.savefig(f'figures/EuclideanDistanceFinalTokenEmbeddings_{model_name}_test_with_primes_difference.pdf')
     plt.show()
     plt.close(fig)
+
+    fig, axes = plt.subplots(1, 2, figsize=(ACL_TEXT_WIDTH, ACL_SINGLE_HEIGHT), sharey=True)
+    axes[0].plot(CosSim_12_diff, label='<SA–SB> - <SA–SC> - <SB–SC>')
+    axes[0].set_title('Original')
+    axes[0].legend(loc='best')
+    axes[1].plot(CosSim_12_primes_diff, label="<SA'–SB'> - <SA'–SC'> - <SB'–SC'>")
+    axes[1].set_title('Primes')
+    axes[1].legend(loc='best')
+    fig.supxlabel('Layer')
+    fig.supylabel('Average Difference in Cosine Similarity')
+    fig.suptitle(f'Average Difference in Cosine Similarity <SA–SB> - <SA–SC> - <SB–SC> for {model_name}')
+    fig.tight_layout(rect=[0.04, 0.04, 1.0, 0.93])
+    fig.savefig(f'figures/CosineSimilarityDifferenceFinalTokenEmbeddings_{model_name}_test_with_difference.png')
+    fig.savefig(f'figures/CosineSimilarityDifferenceFinalTokenEmbeddings_{model_name}_test_with_difference.eps')
+    fig.savefig(f'figures/CosineSimilarityDifferenceFinalTokenEmbeddings_{model_name}_test_with_difference.pdf')
+    plt.show()
+    plt.close(fig)
+
+
+
+# plot all six models in one plot
+
+
+# CosSim_12_finance_Llama = np.load(f'data/CosSim_12_tarun7r_Finance-Llama-8B_test_with_difference.npy')
+# CosSim_12_bio_Llama = np.load(f'data/CosSim_12_ContactDoctor_Bio-Medical-Llama-3-8B_test_with_difference.npy')
+# CosSim_12_llama = np.load(f'data/CosSim_12_meta-llama_Meta-Llama-3-8B_test_with_difference.npy')
+# CosSim_12_finance_BERT = np.load(f'data/CosSim_12_marcev_financebert_test_with_difference.npy')
+# CosSim_12_bio_BERT = np.load(f'data/CosSim_12_dmis-lab_biobert-base-cased-v1.2_test_with_difference.npy')
+# CosSim_12_llama_BERT = np.load(f'data/CosSim_12_google_multiberts-seed_3_test_with_difference.npy')
+CosSim_12_finance_Llama_diff = np.load(f'data/CosSim_12_diff_tarun7r_Finance-Llama-8B_test_with_difference.npy')
+CosSim_12_bio_Llama_diff = np.load(f'data/CosSim_12_diff_ContactDoctor_Bio-Medical-Llama-3-8B_test_with_difference.npy')
+CosSim_12_llama_diff = np.load(f'data/CosSim_12_diff_meta-llama_Meta-Llama-3-8B_test_with_difference.npy')
+CosSim_12_finance_BERT_diff = np.load(f'data/CosSim_12_diff_marcev_financebert_test_with_difference.npy')
+CosSim_12_bio_BERT_diff = np.load(f'data/CosSim_12_diff_dmis-lab_biobert-base-cased-v1.2_test_with_difference.npy')
+CosSim_12_llama_BERT_diff = np.load(f'data/CosSim_12_diff_google_multiberts-seed_3_test_with_difference.npy')
+fig, axes = plt.subplots(2, 3, figsize=(ACL_TEXT_WIDTH, ACL_SINGLE_HEIGHT), sharey=True)
+
+axes[0, 0].plot(CosSim_12_finance_Llama_diff, label="<SA–SB> - <SA–SC> - <SB–SC>")
+axes[0, 0].set_title('Finance-Llama')
+axes[0, 0].legend(loc='best')
+axes[0, 1].plot(CosSim_12_bio_Llama_diff, label="<SA–SB> - <SA–SC> - <SB–SC>")
+axes[0, 1].set_title('Bio-Medical-Llama')
+axes[0, 1].legend(loc='best')
+axes[0, 2].plot(CosSim_12_llama_diff, label="<SA–SB> - <SA–SC> - <SB–SC>")
+axes[0, 2].set_title('Llama')
+axes[0, 2].legend(loc='best')
+
+axes[1, 0].plot(CosSim_12_finance_BERT_diff, label="<SA–SB> - <SA–SC> - <SB–SC>")
+axes[1, 0].set_title('FinanceBERT')
+axes[1, 0].legend(loc='best')
+axes[1, 1].plot(CosSim_12_bio_BERT_diff, label="<SA–SB> - <SA–SC> - <SB–SC>")
+axes[1, 1].set_title('BioBERT')
+axes[1, 1].legend(loc='best')
+axes[1, 2].plot(CosSim_12_llama_BERT_diff, label="<SA–SB> - <SA–SC> - <SB–SC>")
+axes[1, 2].set_title('MultiBERTs')
+axes[1, 2].legend(loc='best')
+
+fig.supxlabel('Layer')
+fig.supylabel('Average Cosine Similarity')
+fig.suptitle('Average Difference in Cosine Similarity <SA–SB> - <SA–SC> - <SB–SC>')
+fig.tight_layout(rect=[0.04, 0.04, 1.0, 0.93])
+
+fig.savefig(f'figures/CosineSimilarityFinalTokenEmbeddings_all_models_test_with_difference.png')
+fig.savefig(f'figures/CosineSimilarityFinalTokenEmbeddings_all_models_test_with_difference.eps')
+fig.savefig(f'figures/CosineSimilarityFinalTokenEmbeddings_all_models_test_with_difference.pdf')
+plt.show()
+plt.close(fig)
+
 
 
 

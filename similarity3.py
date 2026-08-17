@@ -18,7 +18,7 @@ nltk.download('stopwords')
 from transformers import AutoModel, AutoTokenizer, AutoConfig
 from transformers import AutoTokenizer, AutoModelForCausalLM, AutoModelForMaskedLM
 from sklearn.metrics.pairwise import cosine_similarity
-from scipy.stats import pearsonr, kendalltau, spearmanr, ttest_1samp
+from scipy.stats import pearsonr, kendalltau, spearmanr, ttest_1samp, ttest_rel
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -456,6 +456,10 @@ for model_name in tqdm.tqdm(models):
     Euclidean_12_primes = []
     Euclidean_13_primes = []
     Euclidean_23_primes = []
+
+    # Per-sentence raw arrays per layer for paired t-tests
+    all_sims_12 = []
+    all_sims_12_primes = []
   
 
     for layer_idx in range(len(layers)):
@@ -489,6 +493,26 @@ for model_name in tqdm.tqdm(models):
         CosSim_12_primes_diff.append(np.mean(sim_diff_primes))
         Euclidean_12.append(np.mean(euclidean_12))
         Euclidean_12_primes.append(np.mean(euclidean_12_primes))
+        all_sims_12.append(list(sims_12))
+        all_sims_12_primes.append(list(sims_12_primes))
+
+    # Paired t-test per layer: <SA–SB>-<SA–SC> vs <SA'–SB'>-<SA'–SC'>
+    layer_x = list(range(len(all_sims_12)))
+    ttest_p_values = []
+    for l in layer_x:
+        _, p = ttest_rel(all_sims_12[l], all_sims_12_primes[l])
+        ttest_p_values.append(p)
+
+    def sig_stars(p):
+        if p < 0.001:
+            return '***'
+        elif p < 0.01:
+            return '**'
+        elif p < 0.05:
+            return '*'
+        return ''
+
+    sig_labels = [sig_stars(p) for p in ttest_p_values]
 
     #save
     model_name_save = model_name.replace('/', '_')
@@ -511,6 +535,14 @@ for model_name in tqdm.tqdm(models):
 
     fig, axes = plt.subplots(1, 2, figsize=(ACL_TEXT_WIDTH, ACL_SINGLE_HEIGHT), sharey=True)
 
+    sig_x = [l for l, lbl in enumerate(sig_labels) if lbl]
+    sig_marker_handle = None
+    for ax in [axes[0], axes[1]]:
+        if sig_x:
+            h, = ax.plot(sig_x, [0.0] * len(sig_x), marker='*', linestyle='none',
+                         color='red', markersize=5, label='p<0.05 (paired t-test)', zorder=5)
+            sig_marker_handle = h
+
     axes[0].plot(CosSim_12, label='<SA–SB> - <SA–SC>')
     axes[0].set_title('Original')
     axes[0].legend(loc='best')
@@ -524,49 +556,34 @@ for model_name in tqdm.tqdm(models):
     fig.suptitle(f'Average Cosine Similarity for {model_name}')
     fig.tight_layout(rect=[0.04, 0.04, 1.0, 0.93])
 
-    fig.savefig(f'figures/CosineSimilarityFinalTokenEmbeddings_{model_name}_test_with_primes_difference.png')
-    fig.savefig(f'figures/CosineSimilarityFinalTokenEmbeddings_{model_name}_test_with_primes_difference.eps')
-    fig.savefig(f'figures/CosineSimilarityFinalTokenEmbeddings_{model_name}_test_with_primes_difference.pdf')
+    fig.savefig(f'figures/CosineSimilarityFinalTokenEmbeddings_{model_name}_test_with_primes_difference_ttest.png')
+    fig.savefig(f'figures/CosineSimilarityFinalTokenEmbeddings_{model_name}_test_with_primes_difference_ttest.eps')
+    fig.savefig(f'figures/CosineSimilarityFinalTokenEmbeddings_{model_name}_test_with_primes_difference_ttest.pdf')
     plt.show()
     plt.close(fig)
 
-    fig, axes = plt.subplots(1, 2, figsize=(ACL_TEXT_WIDTH, ACL_SINGLE_HEIGHT), sharey=True)
+    fig = plt.figure(figsize=(ACL_TEXT_WIDTH, ACL_SINGLE_HEIGHT))
+    ax = fig.gca()
+    ax.plot(CosSim_12, label='<SA–SB> - <SA–SC>', color='deepskyblue')
+    ax.plot(CosSim_12_primes, label="<SA'–SB'> - <SA'–SC'>", color='chartreuse')
 
-    axes[0].plot(Euclidean_12, label='<SA–SB> - <SA–SC>')
-    axes[0].set_title('Original')
-    axes[0].legend(loc='best')
+    # Asterisks at y=0 for paired t-test significance
+    sig_x = [l for l, lbl in enumerate(sig_labels) if lbl]
+    if sig_x:
+        ax.plot(sig_x, [0.0] * len(sig_x), marker='*', linestyle='none',
+                color='red', markersize=5, label='p<0.05 (paired t-test)', zorder=5)
 
-    axes[1].plot(Euclidean_12_primes, label="<SA'–SB'> - <SA'–SC'>")
-    axes[1].set_title('Primes')
-    axes[1].legend(loc='best')
-
-    fig.supxlabel('Layer')
-    fig.supylabel('Average Euclidean Distance')
-    fig.suptitle(f'Average Normalised Euclidean Distance for {model_name}')
+    ax.legend(loc='best')
+    ax.set_xlabel('Layer')
+    ax.set_ylabel('Average Difference in Cosine Similarity')
+    ax.set_title(f'Average Difference in Cosine Similarity for {model_name}')
     fig.tight_layout(rect=[0.04, 0.04, 1.0, 0.93])
-
-    fig.savefig(f'figures/EuclideanDistanceFinalTokenEmbeddings_{model_name}_test_with_primes_difference.png')
-    fig.savefig(f'figures/EuclideanDistanceFinalTokenEmbeddings_{model_name}_test_with_primes_difference.eps')
-    fig.savefig(f'figures/EuclideanDistanceFinalTokenEmbeddings_{model_name}_test_with_primes_difference.pdf')
+    fig.savefig(f'figures/CosineSimilarityDifferenceFinalTokenEmbeddings_{model_name}_test_original_primes_ttest.png')
+    fig.savefig(f'figures/CosineSimilarityDifferenceFinalTokenEmbeddings_{model_name}_test_original_primes_ttest.eps')
+    fig.savefig(f'figures/CosineSimilarityDifferenceFinalTokenEmbeddings_{model_name}_test_original_primes_ttest.pdf')
     plt.show()
-    plt.close(fig)
 
-    fig, axes = plt.subplots(1, 2, figsize=(ACL_TEXT_WIDTH, ACL_SINGLE_HEIGHT), sharey=True)
-    axes[0].plot(CosSim_12_diff, label='<SA–SB> - <SA–SC> - <SB–SC>')
-    axes[0].set_title('Original')
-    axes[0].legend(loc='best')
-    axes[1].plot(CosSim_12_primes_diff, label="<SA'–SB'> - <SA'–SC'> - <SB'–SC'>")
-    axes[1].set_title('Primes')
-    axes[1].legend(loc='best')
-    fig.supxlabel('Layer')
-    fig.supylabel('Average Difference in Cosine Similarity')
-    fig.suptitle(f'Average Difference in Cosine Similarity <SA–SB> - <SA–SC> - <SB–SC> for {model_name}')
-    fig.tight_layout(rect=[0.04, 0.04, 1.0, 0.93])
-    fig.savefig(f'figures/CosineSimilarityDifferenceFinalTokenEmbeddings_{model_name}_test_with_difference.png')
-    fig.savefig(f'figures/CosineSimilarityDifferenceFinalTokenEmbeddings_{model_name}_test_with_difference.eps')
-    fig.savefig(f'figures/CosineSimilarityDifferenceFinalTokenEmbeddings_{model_name}_test_with_difference.pdf')
-    plt.show()
-    plt.close(fig)
+
 
 
 

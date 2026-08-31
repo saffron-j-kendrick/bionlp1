@@ -495,7 +495,7 @@ for model_name in tqdm.tqdm(models):
         all_sims_12.append(list(sims_12))
         all_sims_12_primes.append(list(sims_12_primes))
 
-    # Paired t-test per layer: <SA–SB>-<SA–SC> vs <SA'–SB'>-<SA'–SC'>
+    # Paired t-test per layer: <SB–SA>-<SB-SC> vs <SB'–SA'>-<SB'–SC'>
     layer_x = list(range(len(all_sims_12)))
     ttest_p_values = []
     for l in layer_x:
@@ -523,6 +523,9 @@ for model_name in tqdm.tqdm(models):
     np.save(f'data/CosSim_23_primes_{model_name_save}_test_with_difference.npy', CosSim_23_primes)
     np.save(f'data/CosSim_12_diff_{model_name_save}_test_with_difference.npy', CosSim_12_diff)
     np.save(f'data/CosSim_12_primes_diff_{model_name_save}_test_with_difference.npy', CosSim_12_primes_diff)
+    # Raw per-sentence arrays (shape: num_layers × num_sentences) needed for paired t-tests
+    np.save(f'data/all_sims_12_{model_name_save}_test_with_difference.npy', np.array(all_sims_12))
+    np.save(f'data/all_sims_12_primes_{model_name_save}_test_with_difference.npy', np.array(all_sims_12_primes))
     # # np.save(f'data/Euclidean_12_{model_name_save}_test_with_primes.npy', Euclidean_12)
     # np.save(f'data/Euclidean_13_{model_name_save}_test_with_primes.npy', Euclidean_13)
     # np.save(f'data/Euclidean_23_{model_name_save}_test_with_primes.npy', Euclidean_23)
@@ -649,25 +652,49 @@ CosSim_12_finance_primes = np.load(f'data/CosSim_12_primes_tarun7r_Finance-Llama
 CosSim_12_bio_primes = np.load(f'data/CosSim_12_primes_ContactDoctor_Bio-Medical-Llama-3-8B_test_with_difference.npy')
 CosSim_12_llama_primes = np.load(f'data/CosSim_12_primes_meta-llama_Meta-Llama-3-8B_test_with_difference.npy')
 
-# Euclidean_12_finance = np.load(f'data/Euclidean_12_tarun7r_Finance-Llama-8B_test_with_primes.npy')
-# Euclidean_12_bio = np.load(f'data/Euclidean_12_ContactDoctor_Bio-Medical-Llama-3-8B_test_with_primes.npy')
-# Euclidean_12_llama = np.load(f'data/Euclidean_12_meta-llama_Llama-3.2-3B_test_with_primes.npy')
+
+# Paired t-test per layer: Bio-Medical-Llama vs base Llama
+# Requires raw per-sentence arrays (shape: num_layers × num_sentences)
+all_sims_12_bio   = np.load('data/all_sims_12_ContactDoctor_Bio-Medical-Llama-3-8B_test_with_difference.npy')
+all_sims_12_llama = np.load('data/all_sims_12_meta-llama_Meta-Llama-3-8B_test_with_difference.npy')
+all_sims_12_bio_primes   = np.load('data/all_sims_12_primes_ContactDoctor_Bio-Medical-Llama-3-8B_test_with_difference.npy')
+all_sims_12_llama_primes = np.load('data/all_sims_12_primes_meta-llama_Meta-Llama-3-8B_test_with_difference.npy')
+
+# Each row is one layer; each column is one sentence pair.
+# One-tailed test: alternative='greater' tests H1: mean(BioLlama) > mean(Llama).
+layer_x = list(range(all_sims_12_llama.shape[0]))
+ttest_p_values = [ttest_rel(all_sims_12_bio[l], all_sims_12_llama[l], alternative='greater').pvalue for l in layer_x]
+sig_labels = [sig_stars(p) for p in ttest_p_values]
+
+ttest_p_values_primes = [ttest_rel(all_sims_12_bio_primes[l], all_sims_12_llama_primes[l], alternative='greater').pvalue for l in layer_x]
+sig_labels_primes = [sig_stars(p) for p in ttest_p_values_primes]
 
 # plot
 
 fig, axes = plt.subplots(1, 2, figsize=(ACL_TEXT_WIDTH, ACL_SINGLE_HEIGHT), sharey=True)
 
+# Significance markers at y=0 before data lines so data lines render on top
+sig_x_orig   = [l for l, lbl in enumerate(sig_labels) if lbl]
+sig_x_primes = [l for l, lbl in enumerate(sig_labels_primes) if lbl]
+if sig_x_orig:
+    axes[0].plot(sig_x_orig, [0.0] * len(sig_x_orig), marker='*', linestyle='none',
+                 color='red', markersize=5, label='BioLlama > Llama', zorder=5)
+if sig_x_primes:
+    axes[1].plot(sig_x_primes, [0.0] * len(sig_x_primes), marker='*', linestyle='none',
+                 color='red', markersize=5, label='BioLlama > Llama', zorder=5)
+
 axes[0].plot(CosSim_12_finance, label="Finance-Llama-8B", color='deepskyblue')
 axes[0].plot(CosSim_12_bio, label="Bio-Medical-Llama-3-8B", color='mediumpurple')
 axes[0].plot(CosSim_12_llama, label="Llama-3.2-3B", color='chartreuse')
 axes[0].set_title('Original')
-axes[0].legend(loc='best')
+# axes[0].legend(loc='best')
 
 axes[1].plot(CosSim_12_finance_primes, label="Finance-Llama-8B", color='deepskyblue')
 axes[1].plot(CosSim_12_bio_primes, label="Bio-Medical-Llama-3-8B", color='mediumpurple')
 axes[1].plot(CosSim_12_llama_primes, label="Llama-3.2-3B", color='chartreuse')
 axes[1].set_title('Primes')
 axes[1].legend(loc='best')
+
 
 fig.supxlabel('Layer')
 fig.supylabel('Average Cosine Similarity Difference')

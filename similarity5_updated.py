@@ -76,8 +76,6 @@ model_name_map = {
     'epfl-llm/meditron-7b': 'Meditron-7B',
     'dmis-lab/biobert-base-cased-v1.2': 'BioBERT',
     'google-bert/bert-base-cased': 'BERT-base-cased',
-    'openai-community/gpt2-medium': 'GPT-2-medium',
-    'healx/gpt-2-pubmed-medium': 'GPT-2-pubmed-medium',
     'answerdotai/ModernBERT-base': 'ModernBERT-base',
     'thomas-sounack/BioClinical-ModernBERT-base': 'BioClinical-ModernBERT-base',
 }
@@ -146,6 +144,27 @@ def load_model_from_classes(name, configuration_class, model_class, tokeniser_cl
     model = model_class.from_pretrained(weights, config=config, **model_kwargs)
     tokeniser = tokeniser_class.from_pretrained(weights, **common_kwargs)
     return model, tokeniser
+
+
+def linear_cka(X, Y):
+    """Linear CKA between representation matrices X and Y (n_samples x n_features).
+
+    Measures how similar the geometry of two sets of representations is across
+    the same set of samples (sentences).  A value of 1 means the two
+    representation spaces are identical up to an orthogonal transformation;
+    0 means they are completely unrelated.
+
+    Formula (Kornblith et al. 2019):
+        CKA(X, Y) = ||X_c^T Y_c||_F^2 / (||X_c^T X_c||_F * ||Y_c^T Y_c||_F)
+    where X_c = H @ X, H = I - (1/n) 11^T is the centering matrix.
+    """
+    n = X.shape[0]
+    H = np.eye(n) - np.ones((n, n)) / n
+    X_c = H @ X
+    Y_c = H @ Y
+    numerator = np.linalg.norm(X_c.T @ Y_c, 'fro') ** 2
+    denom = np.linalg.norm(X_c.T @ X_c, 'fro') * np.linalg.norm(Y_c.T @ Y_c, 'fro')
+    return float(numerator / denom) if denom > 0 else 0.0
 
 
 def benjamini_hochberg(p_values):
@@ -364,43 +383,26 @@ for i in range(len(abbr_dataset)):
 ### MODELS ###
 
 
-# dev_model_configs = {
-#     'meta-llama/Meta-Llama-3-8B': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'meta-llama/Meta-Llama-3-8B'),
-#     'aaditya/Llama3-OpenBioLLM-8B': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'aaditya/Llama3-OpenBioLLM-8B'),
-#     'meta-llama/Meta-Llama-3-8B-Instruct': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'meta-llama/Meta-Llama-3-8B-Instruct'),
-#     'ContactDoctor/Bio-Medical-Llama-3-8B': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'ContactDoctor/Bio-Medical-Llama-3-8B'),
-#     'bionlp/bluebert_pubmed_uncased_L-12_H-768_A-12': (BertConfig, BertModel, BertTokenizer, 'bionlp/bluebert_pubmed_uncased_L-12_H-768_A-12'),
-#     'google-bert/bert-base-uncased': (AutoConfig, AutoModel, AutoTokenizer, 'google-bert/bert-base-uncased'),
-#     'microsoft/MediPhi-Instruct': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'microsoft/MediPhi-Instruct'),
-#     'microsoft/Phi-3.5-mini-instruct': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'microsoft/Phi-3.5-mini-instruct'),
-#     'BioMistral/BioMistral-7B': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'BioMistral/BioMistral-7B'),
-#     'mistralai/Mistral-7B-Instruct-v0.1': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'mistralai/Mistral-7B-Instruct-v0.1'),
-#     'dmis-lab/biobert-base-cased-v1.2': (BertConfig, BertModel, BertTokenizer, 'dmis-lab/biobert-base-cased-v1.2'),
-#     'google-bert/bert-base-cased': (AutoConfig, AutoModel, AutoTokenizer, 'google-bert/bert-base-cased'),
-# }
-
-
-
 dev_model_configs = {
-
-    'healx/gpt-2-pubmed-medium': (GPT2Config, GPT2LMHeadModel, GPT2Tokenizer, 'healx/gpt-2-pubmed-medium'),
+    'meta-llama/Meta-Llama-3-8B': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'meta-llama/Meta-Llama-3-8B'),
+    'aaditya/Llama3-OpenBioLLM-8B': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'aaditya/Llama3-OpenBioLLM-8B'),
+    'meta-llama/Meta-Llama-3-8B-Instruct': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'meta-llama/Meta-Llama-3-8B-Instruct'),
+    'ContactDoctor/Bio-Medical-Llama-3-8B': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'ContactDoctor/Bio-Medical-Llama-3-8B'),
+    'bionlp/bluebert_pubmed_uncased_L-12_H-768_A-12': (BertConfig, BertModel, BertTokenizer, 'bionlp/bluebert_pubmed_uncased_L-12_H-768_A-12'),
+    'google-bert/bert-base-uncased': (AutoConfig, AutoModel, AutoTokenizer, 'google-bert/bert-base-uncased'),
+    'microsoft/MediPhi-Instruct': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'microsoft/MediPhi-Instruct'),
+    'microsoft/Phi-3.5-mini-instruct': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'microsoft/Phi-3.5-mini-instruct'),
+    'BioMistral/BioMistral-7B': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'BioMistral/BioMistral-7B'),
+    'mistralai/Mistral-7B-Instruct-v0.1': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'mistralai/Mistral-7B-Instruct-v0.1'),
+    'meta-llama/Llama-2-7b-hf': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'meta-llama/Llama-2-7b-hf'),
+    'epfl-llm/meditron-7b': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'epfl-llm/meditron-7b'),
+    'dmis-lab/biobert-base-cased-v1.2': (BertConfig, BertModel, BertTokenizer, 'dmis-lab/biobert-base-cased-v1.2'),
+    'google-bert/bert-base-cased': (AutoConfig, AutoModel, AutoTokenizer, 'google-bert/bert-base-cased'),
     'answerdotai/ModernBERT-base': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'answerdotai/ModernBERT-base'),
     'thomas-sounack/BioClinical-ModernBERT-base': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'thomas-sounack/BioClinical-ModernBERT-base'),
 }
 
-# dev_model_configs = {
-   
-#     'bionlp/bluebert_pubmed_uncased_L-12_H-768_A-12': (BertConfig, BertModel, BertTokenizer, 'bionlp/bluebert_pubmed_uncased_L-12_H-768_A-12'),
-#     'google-bert/bert-base-uncased': (AutoConfig, AutoModel, AutoTokenizer, 'google-bert/bert-base-uncased'),
-#     'microsoft/MediPhi-Instruct': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'microsoft/MediPhi-Instruct'),
-#     'microsoft/Phi-3.5-mini-instruct': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'microsoft/Phi-3.5-mini-instruct'),
-#     'BioMistral/BioMistral-7B': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'BioMistral/BioMistral-7B'),
-#     'mistralai/Mistral-7B-Instruct-v0.1': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'mistralai/Mistral-7B-Instruct-v0.1'),
-#     'meta-llama/Llama-2-7b-hf': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'meta-llama/Llama-2-7b-hf'),
-#     'epfl-llm/meditron-7b': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'epfl-llm/meditron-7b'),
-#     'dmis-lab/biobert-base-cased-v1.2': (AutoConfig, AutoModel, AutoTokenizer, 'dmis-lab/biobert-base-cased-v1.2'),
-#     'google-bert/bert-base-cased': (AutoConfig, AutoModel, AutoTokenizer, 'google-bert/bert-base-cased'),
-# }
+
 
 
 ENCODER_MODELS = {
@@ -592,6 +594,28 @@ for model_name in tqdm.tqdm(models):
         all_sims_12_primes.append(list(sims_12_primes))
         all_sim_diff_full.append(list(sim_diff_full))
 
+
+    CKA_12 = []
+    CKA_12_primes = []
+    CKA_12_full_diff = []
+
+    for layer_idx in range(len(layers)):
+        X_a = np.vstack([sentence_a_embs[s][layer_idx] for s in range(len(sentence_a_embs))])
+        X_b = np.vstack([sentence_b_embs[s][layer_idx] for s in range(len(sentence_b_embs))])
+        X_c = np.vstack([sentence_c_embs[s][layer_idx] for s in range(len(sentence_c_embs))])
+        X_a_p = np.vstack([sentence_a_primes_embs[s][layer_idx] for s in range(len(sentence_a_primes_embs))])
+        X_b_p = np.vstack([sentence_b_primes_embs[s][layer_idx] for s in range(len(sentence_b_primes_embs))])
+        X_c_p = np.vstack([sentence_c_primes_embs[s][layer_idx] for s in range(len(sentence_c_primes_embs))])
+
+        cka_ba   = linear_cka(X_b,   X_a)
+        cka_bc   = linear_cka(X_b,   X_c)
+        cka_ba_p = linear_cka(X_b_p, X_a_p)
+        cka_bc_p = linear_cka(X_b_p, X_c_p)
+
+        CKA_12.append(cka_ba - cka_bc)
+        CKA_12_primes.append(cka_ba_p - cka_bc_p)
+        CKA_12_full_diff.append((cka_ba - cka_bc) + (cka_ba_p - cka_bc_p))
+
     # One-sample t-test per layer (H0: combined score = 0) followed by
     # Benjamini-Hochberg FDR correction across all layers for this model.
     layer_x = list(range(len(all_sim_diff_full)))
@@ -625,6 +649,11 @@ for model_name in tqdm.tqdm(models):
     np.save(f'data/all_sim_diff_full_{model_name_save}_test_with_difference.npy', np.array(all_sim_diff_full))
     np.save(f'data/ttest_p_values_{model_name_save}_test_with_difference.npy', np.asarray(ttest_p_values))
     np.save(f'data/ttest_q_values_bh_fdr_{model_name_save}_test_with_difference.npy', np.asarray(ttest_q_values))
+
+    # CKA results
+    np.save(f'data/CKA_12_{model_name_save}_test_with_difference.npy', np.array(CKA_12))
+    np.save(f'data/CKA_12_primes_{model_name_save}_test_with_difference.npy', np.array(CKA_12_primes))
+    np.save(f'data/CKA_12_full_diff_{model_name_save}_test_with_difference.npy', np.array(CKA_12_full_diff))
     # # np.save(f'data/Euclidean_12_{model_name_save}_test_with_primes.npy', Euclidean_12)
     # np.save(f'data/Euclidean_13_{model_name_save}_test_with_primes.npy', Euclidean_13)
     # np.save(f'data/Euclidean_23_{model_name_save}_test_with_primes.npy', Euclidean_23)
@@ -688,6 +717,69 @@ for model_name in tqdm.tqdm(models):
     fig.savefig(f'figures/CosineSimilarityDifference_{display_name}_test_oneplot.pdf')
     plt.show()
     plt.close(fig)
+
+    fig_cka, axes_cka = plt.subplots(1, 2, figsize=(ACL_TEXT_WIDTH, ACL_SINGLE_HEIGHT), sharey=False)
+
+    axes_cka[0].plot(layer_numbers, CKA_12,        label='CKA(B,A) - CKA(B,C)',         color='deepskyblue')
+    axes_cka[0].plot(layer_numbers, CKA_12_primes, label="CKA(B',A') - CKA(B',C')",     color='chartreuse')
+    axes_cka[0].set_title('Independent Components (CKA)')
+    axes_cka[0].legend(loc='best')
+
+    axes_cka[1].plot(layer_numbers, CKA_12_full_diff,
+                     label="(CKA(B,A)-CKA(B,C)) + (CKA(B',A')-CKA(B',C'))", color='darkorange')
+    axes_cka[1].set_title('Combined CKA Difference')
+    axes_cka[1].legend(loc='best')
+
+    fig_cka.supxlabel('Layer')
+    fig_cka.supylabel('CKA Difference')
+    fig_cka.suptitle(f'Combined CKA Difference for {display_name}')
+    fig_cka.tight_layout(rect=[0.04, 0.04, 1.0, 0.93])
+
+    fig_cka.savefig(f'figures/CKADifference_{display_name}_test_twoplot.png')
+    fig_cka.savefig(f'figures/CKADifference_{display_name}_test_twoplot.eps')
+    fig_cka.savefig(f'figures/CKADifference_{display_name}_test_twoplot.pdf')
+    plt.show()
+    plt.close(fig_cka)
+
+    fig_cka1 = plt.figure(figsize=(ACL_TEXT_WIDTH, ACL_SINGLE_HEIGHT))
+    ax_cka1 = fig_cka1.gca()
+    ax_cka1.plot(layer_numbers, CKA_12_full_diff,
+                 label="(CKA(B,A)-CKA(B,C)) + (CKA(B',A')-CKA(B',C'))", color='darkorange')
+    ax_cka1.legend(loc='best')
+    ax_cka1.set_xlabel('Layer')
+    ax_cka1.set_ylabel('Combined CKA Difference')
+    ax_cka1.set_title(f'Combined CKA Difference for {display_name}')
+    fig_cka1.tight_layout(rect=[0.04, 0.04, 1.0, 0.93])
+    fig_cka1.savefig(f'figures/CKADifference_{display_name}_test_oneplot.png')
+    fig_cka1.savefig(f'figures/CKADifference_{display_name}_test_oneplot.eps')
+    fig_cka1.savefig(f'figures/CKADifference_{display_name}_test_oneplot.pdf')
+    plt.show()
+    plt.close(fig_cka1)
+
+
+    fig_comp, axes_comp = plt.subplots(1, 2, figsize=(ACL_TEXT_WIDTH, ACL_SINGLE_HEIGHT), sharey=False)
+
+    axes_comp[0].plot(layer_numbers, CosSim_12_full_diff, color='darkorange',
+                      label="(<SB–SA>-<SB–SC>) + (<SB'–SA'>-<SB'–SC'>)")
+    axes_comp[0].set_title('Cosine Similarity Difference')
+    axes_comp[0].set_xlabel('Layer')
+    axes_comp[0].set_ylabel('Avg Cosine Sim Diff')
+    axes_comp[0].legend(loc='best')
+
+    axes_comp[1].plot(layer_numbers, CKA_12_full_diff, color='mediumpurple',
+                      label="(CKA(B,A)-CKA(B,C)) + (CKA(B',A')-CKA(B',C'))")
+    axes_comp[1].set_title('CKA Difference')
+    axes_comp[1].set_xlabel('Layer')
+    axes_comp[1].set_ylabel('CKA Diff')
+    axes_comp[1].legend(loc='best')
+
+    fig_comp.suptitle(f'CosSim vs CKA – {display_name}')
+    fig_comp.tight_layout(rect=[0.0, 0.0, 1.0, 0.93])
+    fig_comp.savefig(f'figures/CosSim_vs_CKA_{display_name}_test.png')
+    fig_comp.savefig(f'figures/CosSim_vs_CKA_{display_name}_test.eps')
+    fig_comp.savefig(f'figures/CosSim_vs_CKA_{display_name}_test.pdf')
+    plt.show()
+    plt.close(fig_comp)
 
     # Release the current model before loading the next checkpoint.
     del model

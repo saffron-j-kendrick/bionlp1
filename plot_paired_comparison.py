@@ -1,9 +1,4 @@
-## Paired comparison figure
-## Six subplots – each shows the combined similarity difference
-## (<SB-SA>-<SB-SC>) + (<SB'-SA'>-<SB'-SC'>) for two models overlaid.
-##
-## Significance markers: paired t-test (p-value) between the two models'
-## per-sentence scores at each layer.  Asterisks are drawn between the curves.
+## IMPORTS
 
 import os
 import numpy as np
@@ -11,7 +6,6 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 from scipy.stats import ttest_rel
 
-## ── Layout constants ──────────────────────────────────────────────────────
 ACL_TEXT_WIDTH = 7.00
 ACL_RSA_HEIGHT = 4.50
 
@@ -37,7 +31,6 @@ plt.rcParams.update({
     "ps.fonttype": 42,
 })
 
-## ── Data loaders ──────────────────────────────────────────────────────────
 
 def stem(model_id):
     return model_id.replace('/', '_')
@@ -51,8 +44,6 @@ def load_per_sentence(model_id):
     """Per-sentence combined diff — shape (num_layers, num_sentences)."""
     path = f'data/all_sim_diff_full_{stem(model_id)}_test_with_difference.npy'
     return np.load(path) if os.path.exists(path) else None
-
-## ── Significance helpers ──────────────────────────────────────────────────
 
 def sig_stars(p):
     """Convert a raw p-value to an asterisk string."""
@@ -78,7 +69,6 @@ def paired_pvalues(per_sent_1, per_sent_2):
         pvals[l] = p
     return pvals
 
-## ── Pairs ─────────────────────────────────────────────────────────────────
 
 PAIRS = [
     (
@@ -105,13 +95,20 @@ PAIRS = [
         'google-bert/bert-base-cased',          'BERT-base-cased',       'steelblue',
         'dmis-lab/biobert-base-cased-v1.2',    'BioBERT',               'darkorange',
     ),
+    (
+        'openai-community/gpt2-medium',         'GPT-2-medium',          'steelblue',
+        'healx/gpt-2-pubmed-medium',            'GPT-2-pubmed-medium',   'darkorange',
+    ),
+    (
+        'answerdotai/ModernBERT-base',          'ModernBERT-base',       'steelblue',
+        'thomas-sounack/BioClinical-ModernBERT-base', 'BioClinical-ModernBERT', 'darkorange',
+    ),
 ]
 
-## ── Build figure ──────────────────────────────────────────────────────────
 
 fig, axes = plt.subplots(
-    2, 3,
-    figsize=(ACL_TEXT_WIDTH * 1.5, ACL_RSA_HEIGHT * 1.2),
+    2, 4,
+    figsize=(ACL_TEXT_WIDTH * 2.0, ACL_RSA_HEIGHT * 1.2),
     constrained_layout=True,
 )
 
@@ -176,3 +173,59 @@ fig.savefig('figures/PairedComparison_combined_diff.pdf',           bbox_inches=
 fig.savefig('figures/PairedComparison_combined_diff.eps',           bbox_inches='tight')
 plt.show()
 print("Saved to figures/PairedComparison_combined_diff.{png,pdf,eps}")
+
+
+import matplotlib.cm as cm
+
+BASE_MODELS = [(id1, lbl1) for id1, lbl1, _, id2, lbl2, _ in PAIRS]
+BIO_MODELS  = [(id2, lbl2) for id1, lbl1, _, id2, lbl2, _ in PAIRS]
+
+def _overlay_figure(model_list, title, filename_stem):
+    """
+    Plot mean combined diff curves for every model in model_list on one axes.
+    Models with different layer counts are handled naturally — each curve ends
+    at its own final layer.
+    """
+    n = len(model_list)
+    colours = [cm.tab10(i / n) for i in range(n)]
+
+    fig_ov, ax_ov = plt.subplots(
+        figsize=(ACL_TEXT_WIDTH * 1.4, ACL_RSA_HEIGHT * 1.1),
+        constrained_layout=True,
+    )
+
+    any_plotted = False
+    for (model_id, label), col in zip(model_list, colours):
+        mean = load_mean_diff(model_id)
+        if mean is None:
+            print(f"  Skipping {label} — data not found")
+            continue
+        layers = list(range(1, len(mean) + 1))
+        ax_ov.plot(layers, mean, label=label, color=col)
+        any_plotted = True
+
+    ax_ov.axhline(0, color='black', linewidth=0.6, linestyle='--', alpha=0.5)
+    ax_ov.set_xlabel('Layer')
+    ax_ov.set_ylabel('Avg Combined Cosine Sim Diff')
+    ax_ov.set_title(title, fontsize=8)
+    ax_ov.xaxis.set_major_locator(ticker.MaxNLocator(integer=True, nbins=10))
+    ax_ov.legend(loc='best', framealpha=0.7)
+
+    fig_ov.savefig(f'figures/{filename_stem}.png', dpi=150, bbox_inches='tight')
+    fig_ov.savefig(f'figures/{filename_stem}.pdf',           bbox_inches='tight')
+    fig_ov.savefig(f'figures/{filename_stem}.eps',           bbox_inches='tight')
+    plt.show()
+    print(f"Saved to figures/{filename_stem}.{{png,pdf,eps}}")
+    plt.close(fig_ov)
+
+_overlay_figure(
+    BIO_MODELS,
+    "Combined Cosine Similarity Difference — All Biomedical Models",
+    "AllBioModels_combined_diff",
+)
+
+_overlay_figure(
+    BASE_MODELS,
+    "Combined Cosine Similarity Difference — All Base/General Models",
+    "AllBaseModels_combined_diff",
+)

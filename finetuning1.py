@@ -12,6 +12,7 @@ import seaborn as sns
 import os
 import json
 import random
+import gc
 from tqdm.autonotebook import tqdm
 
 os.makedirs("figures", exist_ok=True)
@@ -324,9 +325,12 @@ def make_trainer(model, args, peft_cfg=None):
 LORA_TARGET_MODULES = ['up_proj', 'down_proj', 'gate_proj', 'k_proj', 'q_proj', 'v_proj', 'o_proj']
 
 SPECIFIC_LAYERS  = [11, 12, 13, 19, 31]   # edit to choose any indices 0–31
-RANDOM_SEEDS     = [0, 1, 2, 3, 4]        # five seeds for the random experiment
+NUM_LAYERS       = 32                  
+N_BOUNDARY_LAYERS = 5                      
+FIRST_LAYERS     = list(range(N_BOUNDARY_LAYERS))                            # [0,1,2,3,4]
+LAST_LAYERS      = list(range(NUM_LAYERS - N_BOUNDARY_LAYERS, NUM_LAYERS))   # [27,28,29,30,31]
+RANDOM_SEEDS     = [0, 1, 2, 3, 4]       
 N_RANDOM_LAYERS  = 5
-NUM_LAYERS       = 32                      # Llama-3-8B transformer blocks
 
 def make_lora_config(layers_to_transform=None):
     """
@@ -345,19 +349,45 @@ def make_lora_config(layers_to_transform=None):
         kwargs["layers_to_transform"] = layers_to_transform
     return LoraConfig(**kwargs)
 
+def free_memory():
+    """Aggressively release GPU and CPU memory between experiments."""
+    gc.collect()
+    torch.cuda.synchronize()
+    torch.cuda.empty_cache()
+    gc.collect()
+
+
 def load_base_model():
-    """Load Llama in full bfloat16 precision — no quantisation."""
+    """
+    Load Llama in full bfloat16 precision — no quantisation.
+
+    Caps the GPU allocation to 90 % of available VRAM so that device_map="auto"
+    never falls back to meta-device (CPU offload) after earlier experiments have
+    fragmented the CUDA allocator.  Meta-device parameters cause gradient errors
+    during LoRA backpropagation.
+    """
+    free_memory()
+    free_vram = torch.cuda.get_device_properties(0).total_memory - torch.cuda.memory_reserved(0)
+    max_gpu_gb = int(free_vram * 0.90 / 1024**3)
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_NAME,
         torch_dtype=torch.bfloat16,
         device_map="auto",
+        max_memory={0: f"{max_gpu_gb}GiB", "cpu": "48GiB"},
     )
+    # Verify no layers landed on meta device — that would break LoRA backprop
+    meta_params = [n for n, p in model.named_parameters() if p.device.type == "meta"]
+    if meta_params:
+        raise RuntimeError(
+            f"{len(meta_params)} parameter(s) are on meta device — not enough VRAM to load "
+            "the model without CPU offloading.  Reduce batch size, use quantisation, or free "
+            f"GPU memory before loading.  First offloaded param: {meta_params[0]}"
+        )
     model.config.pad_token_id = tokenizer.eos_token_id
     return model
 
 ## EXPERIMENT 1 — FULL LoRA (all layers)
 
-print("\n=== Experiment 1: Full LoRA (adapters on all layers) ===")
 model_lora_full = load_base_model()
 lora_config_full = make_lora_config(layers_to_transform=None)
 count_trainable_params(model_lora_full)
@@ -375,11 +405,10 @@ results_lora_full  = {"answer_token_loss": ans_loss_full, "mcqa_accuracy": accur
 print(f"Full LoRA   →  answer-token loss: {ans_loss_full:.4f}  |  MCQA accuracy: {accuracy_lora_full:.4f}")
 
 del model_lora_full
-torch.cuda.empty_cache()
+free_memory()
 
 ## EXPERIMENT 2 — SPECIFIC-LAYER LoRA 
 
-print(f"\n=== Experiment 2: Specific-layer LoRA (layers {SPECIFIC_LAYERS}) ===")
 model_lora_specific = load_base_model()
 lora_config_specific = make_lora_config(layers_to_transform=SPECIFIC_LAYERS)
 count_trainable_params(model_lora_specific)
@@ -397,11 +426,51 @@ results_lora_specific  = {"answer_token_loss": ans_loss_specific, "mcqa_accuracy
 print(f"Specific LoRA →  answer-token loss: {ans_loss_specific:.4f}  |  MCQA accuracy: {accuracy_lora_specific:.4f}")
 
 del model_lora_specific
-torch.cuda.empty_cache()
+free_memory()
 
-## EXPERIMENT 3 — RANDOM-LAYER LoRA
+## EXPERIMENT 3 — FIRST-LAYER LoRA
 
-print(f"\n=== Experiment 3: Random-layer LoRA ({len(RANDOM_SEEDS)} seeds, {N_RANDOM_LAYERS} layers each) ===")
+model_lora_first = load_base_model()
+lora_config_first = make_lora_config(layers_to_transform=FIRST_LAYERS)
+count_trainable_params(model_lora_first)
+
+trainer_lora_first = make_trainer(model_lora_first, make_args("checkpoints/lora_first"), peft_cfg=lora_config_first)
+trainer_lora_first.train()
+trainer_lora_first.model.save_pretrained("models/lora_first")
+tokenizer.save_pretrained("models/lora_first")
+
+# trainer_lora_first.evaluate(test_dataset)  # full-sequence loss (commented out)
+traj_first          = extract_trajectory(trainer_lora_first.state.log_history)
+ans_loss_first      = compute_answer_token_loss(trainer_lora_first.model, tokenizer, test_dataset)
+accuracy_lora_first = compute_mcqa_accuracy(trainer_lora_first.model, tokenizer, test_dataset)
+results_lora_first  = {"answer_token_loss": ans_loss_first, "mcqa_accuracy": accuracy_lora_first}
+print(f"First-layer LoRA  →  answer-token loss: {ans_loss_first:.4f}  |  MCQA accuracy: {accuracy_lora_first:.4f}")
+
+del model_lora_first
+free_memory()
+
+## EXPERIMENT 4 — LAST-LAYER LoRA
+
+model_lora_last = load_base_model()
+lora_config_last = make_lora_config(layers_to_transform=LAST_LAYERS)
+count_trainable_params(model_lora_last)
+
+trainer_lora_last = make_trainer(model_lora_last, make_args("checkpoints/lora_last"), peft_cfg=lora_config_last)
+trainer_lora_last.train()
+trainer_lora_last.model.save_pretrained("models/lora_last")
+tokenizer.save_pretrained("models/lora_last")
+
+# trainer_lora_last.evaluate(test_dataset)  # full-sequence loss (commented out)
+traj_last          = extract_trajectory(trainer_lora_last.state.log_history)
+ans_loss_last      = compute_answer_token_loss(trainer_lora_last.model, tokenizer, test_dataset)
+accuracy_lora_last = compute_mcqa_accuracy(trainer_lora_last.model, tokenizer, test_dataset)
+results_lora_last  = {"answer_token_loss": ans_loss_last, "mcqa_accuracy": accuracy_lora_last}
+print(f"Last-layer LoRA   →  answer-token loss: {ans_loss_last:.4f}  |  MCQA accuracy: {accuracy_lora_last:.4f}")
+
+del model_lora_last
+free_memory()
+
+## EXPERIMENT 5 — RANDOM-LAYER LoRA
 
 random_run_results = []   # list of dicts, one per seed
 random_trajectories = []  # list of trajectory tuples, one per seed
@@ -434,7 +503,7 @@ for seed in RANDOM_SEEDS:
     print(f"  Seed {seed}  →  answer-token loss: {ans_loss_rand:.4f}  |  MCQA accuracy: {acc:.4f}")
 
     del model_rand
-    torch.cuda.empty_cache()
+    free_memory()
 
 # Aggregate across seeds
 rand_losses     = [r["answer_token_loss"] for r in random_run_results]
@@ -458,6 +527,8 @@ print(f"  accuracy:          {results_lora_random['mcqa_accuracy']:.4f} ± {resu
 summary = {
     "lora_full":     results_lora_full,
     "lora_specific": results_lora_specific,
+    "lora_first":    results_lora_first,
+    "lora_last":     results_lora_last,
     "lora_random":   results_lora_random,
 }
 
@@ -474,14 +545,20 @@ for name, res in summary.items():
 
 ## FIGURES
 
-labels     = ["Full LoRA", f"Specific Layers\n{SPECIFIC_LAYERS}", f"Random Layers\n(mean of {len(RANDOM_SEEDS)} seeds)"]
+labels = [
+    "Full LoRA",
+    f"Specific Layers\n{SPECIFIC_LAYERS}",
+    f"First {N_BOUNDARY_LAYERS} Layers\n{FIRST_LAYERS}",
+    f"Last {N_BOUNDARY_LAYERS} Layers\n{LAST_LAYERS}",
+    f"Random Layers\n(mean of {len(RANDOM_SEEDS)} seeds)",
+]
 losses     = [r["answer_token_loss"]     for r in summary.values()]
 accuracies = [r["mcqa_accuracy"]         for r in summary.values()]
 loss_errs  = [r.get("answer_token_loss_std", 0) for r in summary.values()]
 acc_errs   = [r.get("mcqa_accuracy_std",    0)  for r in summary.values()]
-colours    = sns.color_palette("muted", 3)
+colours    = sns.color_palette("muted", 5)
 
-fig, (ax_loss, ax_acc) = plt.subplots(1, 2, figsize=(13, 5))
+fig, (ax_loss, ax_acc) = plt.subplots(1, 2, figsize=(16, 5))
 
 bars = ax_loss.bar(labels, losses, color=colours, edgecolor="black", yerr=loss_errs,
                    capsize=5, error_kw={"elinewidth": 1.2})
@@ -506,15 +583,23 @@ plt.savefig("figures/finetuning1_results.pdf")
 plt.close()
 print("Figure saved to figures/finetuning1_results.{png,pdf}")
 
-traj_colours = {"Full LoRA": "#4C72B0", "Specific Layers": "#DD8452", "Random Layers (avg)": "#55A868"}
+traj_colours = {
+    "Full LoRA":           "#4C72B0",
+    "Specific Layers":     "#DD8452",
+    "First Layers":        "#8172B2",
+    "Last Layers":         "#C44E52",
+    "Random Layers (avg)": "#55A868",
+}
 
 fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 ax_train, ax_eval = axes
 
 experiment_trajs = [
-    ("Full LoRA",          traj_full,     None),
-    ("Specific Layers",    traj_specific, None),
-    ("Random Layers (avg)", None,         traj_random_avg),
+    ("Full LoRA",           traj_full,     None),
+    ("Specific Layers",     traj_specific, None),
+    ("First Layers",        traj_first,    None),
+    ("Last Layers",         traj_last,     None),
+    ("Random Layers (avg)", None,          traj_random_avg),
 ]
 
 for label, traj, traj_avg in experiment_trajs:

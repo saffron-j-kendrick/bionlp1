@@ -1,21 +1,29 @@
 {
   "lora_full": {
-    "answer_token_loss": 0.10869181781501079,
-    "mcqa_accuracy": 0.6166535742340927
+    "answer_token_loss": 0.1087093844733583,
+    "mcqa_accuracy": 0.6197957580518461
   },
   "lora_specific": {
-    "answer_token_loss": 0.11661874821450838,
-    "mcqa_accuracy": 0.5734485467399842
+    "answer_token_loss": 0.11658995806069695,
+    "mcqa_accuracy": 0.5758051846032993
+  },
+  "lora_first": {
+    "answer_token_loss": 0.11632337128853483,
+    "mcqa_accuracy": 0.5742340926944226
+  },
+  "lora_last": {
+    "answer_token_loss": 0.12880496966545812,
+    "mcqa_accuracy": 0.5365278868813825
   },
   "lora_random": {
-    "answer_token_loss": 0.11373267677138484,
-    "answer_token_loss_std": 0.0011361538566982366,
-    "mcqa_accuracy": 0.5916732128829537,
-    "mcqa_accuracy_std": 0.0036979111691876915,
+    "answer_token_loss": 0.11367582641532141,
+    "answer_token_loss_std": 0.0011024698248911996,
+    "mcqa_accuracy": 0.5930871956009426,
+    "mcqa_accuracy_std": 0.00435960311877819,
     "per_seed": [
       {
-        "answer_token_loss": 0.11464951589966835,
-        "mcqa_accuracy": 0.5907305577376276,
+        "answer_token_loss": 0.11449851099424778,
+        "mcqa_accuracy": 0.5930871956009427,
         "seed": 0,
         "layers_chosen": [
           2,
@@ -26,8 +34,8 @@
         ]
       },
       {
-        "answer_token_loss": 0.11265423187438235,
-        "mcqa_accuracy": 0.5923016496465043,
+        "answer_token_loss": 0.11265529226449145,
+        "mcqa_accuracy": 0.593872741555381,
         "seed": 1,
         "layers_chosen": [
           4,
@@ -38,8 +46,8 @@
         ]
       },
       {
-        "answer_token_loss": 0.11221654439164105,
-        "mcqa_accuracy": 0.596229379418696,
+        "answer_token_loss": 0.11227588791340816,
+        "mcqa_accuracy": 0.598586017282011,
         "seed": 2,
         "layers_chosen": [
           3,
@@ -50,8 +58,8 @@
         ]
       },
       {
-        "answer_token_loss": 0.11396141040691514,
-        "mcqa_accuracy": 0.593872741555381,
+        "answer_token_loss": 0.1137255183663378,
+        "mcqa_accuracy": 0.5946582875098193,
         "seed": 3,
         "layers_chosen": [
           4,
@@ -62,7 +70,7 @@
         ]
       },
       {
-        "answer_token_loss": 0.11518168128431727,
+        "answer_token_loss": 0.11522392253812185,
         "mcqa_accuracy": 0.5852317360565593,
         "seed": 4,
         "layers_chosen": [

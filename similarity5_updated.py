@@ -384,22 +384,8 @@ for i in range(len(abbr_dataset)):
 
 
 dev_model_configs = {
-    'meta-llama/Meta-Llama-3-8B': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'meta-llama/Meta-Llama-3-8B'),
-    'aaditya/Llama3-OpenBioLLM-8B': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'aaditya/Llama3-OpenBioLLM-8B'),
-    'meta-llama/Meta-Llama-3-8B-Instruct': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'meta-llama/Meta-Llama-3-8B-Instruct'),
-    'ContactDoctor/Bio-Medical-Llama-3-8B': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'ContactDoctor/Bio-Medical-Llama-3-8B'),
-    'bionlp/bluebert_pubmed_uncased_L-12_H-768_A-12': (BertConfig, BertModel, BertTokenizer, 'bionlp/bluebert_pubmed_uncased_L-12_H-768_A-12'),
-    'google-bert/bert-base-uncased': (AutoConfig, AutoModel, AutoTokenizer, 'google-bert/bert-base-uncased'),
-    'microsoft/MediPhi-Instruct': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'microsoft/MediPhi-Instruct'),
-    'microsoft/Phi-3.5-mini-instruct': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'microsoft/Phi-3.5-mini-instruct'),
-    'BioMistral/BioMistral-7B': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'BioMistral/BioMistral-7B'),
-    'mistralai/Mistral-7B-Instruct-v0.1': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'mistralai/Mistral-7B-Instruct-v0.1'),
-    'meta-llama/Llama-2-7b-hf': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'meta-llama/Llama-2-7b-hf'),
-    'epfl-llm/meditron-7b': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'epfl-llm/meditron-7b'),
-    'dmis-lab/biobert-base-cased-v1.2': (BertConfig, BertModel, BertTokenizer, 'dmis-lab/biobert-base-cased-v1.2'),
-    'google-bert/bert-base-cased': (AutoConfig, AutoModel, AutoTokenizer, 'google-bert/bert-base-cased'),
-    'answerdotai/ModernBERT-base': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'answerdotai/ModernBERT-base'),
-    'thomas-sounack/BioClinical-ModernBERT-base': (AutoConfig, AutoModelForCausalLM, AutoTokenizer, 'thomas-sounack/BioClinical-ModernBERT-base'),
+    'answerdotai/ModernBERT-base': (AutoConfig, AutoModel, AutoTokenizer, 'answerdotai/ModernBERT-base'),
+    'thomas-sounack/BioClinical-ModernBERT-base': (AutoConfig, AutoModel, AutoTokenizer, 'thomas-sounack/BioClinical-ModernBERT-base'),
 }
 
 

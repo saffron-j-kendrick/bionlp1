@@ -1,17 +1,11 @@
 
-"""Attention-head and MLP activation patching on the ADAM dataset.
-
-Sentence_A is the clean primary-expansion context, Sentence_B is the
-abbreviation context, and Sentence_C is the alternative-expansion context.
-The final token of Primary_Expression in Sentence_A is patched into the
-abbreviation token in Sentence_B.
-"""
 
 # This script is going to be used to do activation patching on the adam dataset called adam_dataset_patching_filled.csv
 # Sentence A : "... abdominal aortic aneurysm"
 # Sentence B : "... AAA"
 # Sentence C : "... aromatic amino acids"
 # I want to patch the activation of "aneurysm" in Sentence A to "AAA" into sentence B and then ask the model what does "AAA" mean, abdominal aortic aneurysm or aromatic amino acids?
+# I also patch the final token of Sentence C's alternative expression into the same Sentence B abbreviation token and compare the two indirect effects.
 # I want to measure the logit difference between choosing the correct answer and the incorrect answer before and after the patching.
 # I also want to measure Total Indirect Effect (TIE) before and after the patching.
 # I want to do attention head patching and then separately do mlp patching. 
@@ -19,7 +13,6 @@ abbreviation token in Sentence_B.
 
 
 from __future__ import annotations
-
 import argparse
 import csv
 import hashlib
@@ -32,6 +25,8 @@ from typing import Any
 
 import numpy as np
 import torch
+import matplotlib.pyplot as plt
+import seaborn as sns
 from nnsight import LanguageModel
 
 
@@ -50,10 +45,9 @@ MODEL_CONFIGS = {
     },
 }
 
-# Set from the selected model at the start of run().
-N_LAYERS = 28
-N_HEADS = 24
-D_HEAD = 128
+N_LAYERS: int
+N_HEADS: int
+D_HEAD: int
 BASELINE_NAMES = ("sentence_a", "sentence_b", "sentence_c")
 REQUIRED_COLUMNS = {
     "ABBR",
@@ -67,75 +61,20 @@ REQUIRED_COLUMNS = {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--dataset",
-        type=Path,
-        default=Path("adam_dataset_patching_filled.csv"),
-    )
-    parser.add_argument(
-        "--model",
-        choices=tuple(MODEL_CONFIGS),
-        default="llama3b",
-        help="model to patch (default: llama3b)",
-    )
-    parser.add_argument(
-        "--intervention", choices=("attention_head", "mlp"), required=True
-    )
-    parser.add_argument(
-        "--accumulator",
-        type=Path,
-        help="checkpoint .npz (default: outputs/<intervention>_<model>.npz)",
-    )
-    parser.add_argument(
-        "--output-prefix",
-        type=Path,
-        help="summary path prefix (default: outputs/<intervention>_<model>)",
-    )
-    parser.add_argument(
-        "--start-row",
-        type=int,
-        default=0,
-        help="first zero-based CSV data row considered in this run",
-    )
-    parser.add_argument(
-        "--max-rows",
-        type=int,
-        default=0,
-        help="maximum rows processed this run; 0 means all remaining rows",
-    )
-    parser.add_argument(
-        "--patch-batch-size",
-        type=int,
-        default=24,
-        help="patch conditions evaluated in one model batch",
-    )
-    parser.add_argument(
-        "--answer-reduction",
-        choices=("mean", "sum"),
-        default="mean",
-        help="reduce full-answer token log probabilities (default: mean)",
-    )
-    parser.add_argument(
-        "--cache-dtype",
-        choices=("float32", "float16", "bfloat16"),
-        default="bfloat16",
-    )
-    parser.add_argument(
-        "--device-map",
-        default="auto",
-        help='Hugging Face device map, for example "auto" or "cpu"',
-    )
-    parser.add_argument(
-        "--min-total-effect",
-        type=float,
-        default=1e-6,
-        help="minimum |Sentence_A difference - Sentence_B difference|",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="validate rows without loading the model",
-    )
+    parser.add_argument("--dataset", type=Path, default=Path("adam_dataset_patching_filled2.csv"))
+    parser.add_argument("--model", choices=tuple(MODEL_CONFIGS), default="llama3b", help="model to patch (default: llama3b)")
+    parser.add_argument("--intervention", choices=("attention_head", "mlp"), required=True, help="intervention to apply (default: attention_head)")
+    parser.add_argument("--accumulator", type=Path, help="checkpoint .npz (default: outputs/<intervention>_<model>.npz)")
+    parser.add_argument("--output-prefix", type=Path, help="summary path prefix (default: outputs/<intervention>_<model>)")
+    parser.add_argument("--start-row", type=int, default=0, help="first zero-based CSV data row considered in this run")
+    parser.add_argument("--max-rows", type=int, default=0, help="maximum rows processed this run; 0 means all remaining rows")
+    parser.add_argument("--patch-batch-size", type=int, default=24, help="patch conditions evaluated in one model batch")
+    parser.add_argument("--answer-reduction", choices=("mean", "sum"), default="mean", help="reduce full-answer token log probabilities (default: mean)")
+    parser.add_argument("--cache-dtype", choices=("float32", "float16", "bfloat16"), default="bfloat16", help="cache activations in this dtype (default: bfloat16)")
+    parser.add_argument("--device-map", default="auto", help='Hugging Face device map, for example "auto" or "cpu"')
+    parser.add_argument("--min-total-effect", type=float, default=1e-6, help="minimum |Sentence_A difference - Sentence_B difference|")
+    parser.add_argument("--dry-run", action="store_true", help="validate rows without loading the model")
+    parser.add_argument("--plot-only", action="store_true", help="regenerate summaries and plots from an existing accumulator")
     return parser.parse_args()
 
 
@@ -156,6 +95,7 @@ def read_dataset(path: Path) -> tuple[list[dict[str, str]], list[str]]:
 
 
 def dataset_fingerprint(path: Path) -> str:
+    """identifies dataset in case the accumulator loads a different dataset"""
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
@@ -166,7 +106,7 @@ def dataset_fingerprint(path: Path) -> str:
 def build_context(sentence: str, abbreviation: str) -> str:
     return (
         f"{sentence}\n\n"
-        f'Question: In the sentence above, what does "{abbreviation}" stand for?\n'
+        f'Question: In the sentence above, what does abbreviationstand for?\n'
         "Answer:"
     )
 
@@ -250,6 +190,23 @@ def locate_patch_tokens(
     return context_a, context_b, source_index, target_index
 
 
+def locate_source_token(
+    tokenizer: Any,
+    sentence: str,
+    expression: str,
+    abbreviation: str,
+) -> tuple[str, int]:
+    """Locate the final expression token in a clean source sentence."""
+    expression_spans = find_spans(sentence, expression)
+    if not expression_spans:
+        raise ValueError(f"Expression {expression!r} not found in source sentence")
+    context = build_context(sentence, abbreviation)
+    source_index = token_index_for_span(
+        tokenizer, context, expression_spans[0], use_last_token=True
+    )
+    return context, source_index
+
+
 def answer_encoding(
     tokenizer: Any, context: str, answer: str
 ) -> tuple[str, list[int], list[int]]:
@@ -285,8 +242,10 @@ def score_answer(
         model.tokenizer, context, answer
     )
     targets = torch.tensor(answer_ids, dtype=torch.long)
+ 
     with model.trace(full_text):
         logits = model.lm_head.output[0, positions, :]
+        targets = targets.to(logits.device)
         token_scores = torch.log_softmax(logits, dim=-1).gather(
             -1, targets.unsqueeze(-1)
         ).squeeze(-1)
@@ -363,15 +322,20 @@ def patched_answer_scores(
                 end = start + D_HEAD
                 activation = attention_module(model, layer).input
                 activation[batch_index, target_index, start:end] = (
-                    clean_activations[layer][int(head)].to(activation.dtype)
+                    clean_activations[layer][int(head)].to(
+                        device=activation.device, dtype=activation.dtype
+                    )
                 )
             else:
                 activation = mlp_module(model, layer).input
                 activation[batch_index, target_index, :] = (
-                    clean_activations[layer].to(activation.dtype)
+                    clean_activations[layer].to(
+                        device=activation.device, dtype=activation.dtype
+                    )
                 )
 
         logits = model.lm_head.output[:, positions, :]
+        targets = targets.to(logits.device)
         expanded_targets = targets.unsqueeze(0).expand(batch_size, -1)
         token_scores = torch.log_softmax(logits, dim=-1).gather(
             -1, expanded_targets.unsqueeze(-1)
@@ -447,6 +411,12 @@ def new_accumulator(
         "normalized_sums": np.zeros(shape, dtype=np.float64),
         "effect_counts": np.zeros(shape, dtype=np.int64),
         "normalized_counts": np.zeros(shape, dtype=np.int64),
+        "c_status": np.zeros(row_count, dtype=np.uint8),
+        "c_patched_sums": np.zeros(shape, dtype=np.float64),
+        "c_indirect_sums": np.zeros(shape, dtype=np.float64),
+        "c_normalized_sums": np.zeros(shape, dtype=np.float64),
+        "c_effect_counts": np.zeros(shape, dtype=np.int64),
+        "c_normalized_counts": np.zeros(shape, dtype=np.int64),
         "skip_reasons": {},
     }
 
@@ -477,6 +447,24 @@ def load_accumulator(
                 "normalized_counts",
             )
         }
+        shape = (abbreviation_count,) + result_shape
+        accumulator["c_status"] = (
+            data["c_status"].copy()
+            if "c_status" in data
+            else np.zeros(row_count, dtype=np.uint8)
+        )
+        for key, dtype in (
+            ("c_patched_sums", np.float64),
+            ("c_indirect_sums", np.float64),
+            ("c_normalized_sums", np.float64),
+            ("c_effect_counts", np.int64),
+            ("c_normalized_counts", np.int64),
+        ):
+            accumulator[key] = (
+                data[key].copy()
+                if key in data
+                else np.zeros(shape, dtype=dtype)
+            )
         accumulator["metadata"] = saved_metadata
         accumulator["skip_reasons"] = json.loads(
             str(data["skip_reasons"].item())
@@ -499,6 +487,12 @@ def save_accumulator(path: Path, accumulator: dict[str, Any]) -> None:
             normalized_sums=accumulator["normalized_sums"],
             effect_counts=accumulator["effect_counts"],
             normalized_counts=accumulator["normalized_counts"],
+            c_status=accumulator["c_status"],
+            c_patched_sums=accumulator["c_patched_sums"],
+            c_indirect_sums=accumulator["c_indirect_sums"],
+            c_normalized_sums=accumulator["c_normalized_sums"],
+            c_effect_counts=accumulator["c_effect_counts"],
+            c_normalized_counts=accumulator["c_normalized_counts"],
             skip_reasons=np.array(json.dumps(accumulator["skip_reasons"])),
         )
     os.replace(temporary, path)
@@ -511,6 +505,13 @@ def safe_average(sums: np.ndarray, counts: np.ndarray) -> np.ndarray:
         out=np.full_like(sums, np.nan, dtype=np.float64),
         where=counts != 0,
     )
+
+
+def nanmean_or_nan(values: np.ndarray) -> float:
+    finite_values = values[np.isfinite(values)]
+    if finite_values.size == 0:
+        return float("nan")
+    return float(np.mean(finite_values))
 
 
 def write_summaries(
@@ -533,6 +534,25 @@ def write_summaries(
     normalized_means = safe_average(
         accumulator["normalized_sums"], accumulator["normalized_counts"]
     )
+    c_patched_means = safe_average(
+        accumulator["c_patched_sums"], accumulator["c_effect_counts"]
+    )
+    c_indirect_means = safe_average(
+        accumulator["c_indirect_sums"], accumulator["c_effect_counts"]
+    )
+    c_normalized_means = safe_average(
+        accumulator["c_normalized_sums"],
+        accumulator["c_normalized_counts"],
+    )
+    paired_counts = (
+        (accumulator["effect_counts"] == accumulator["c_effect_counts"])
+        & (accumulator["effect_counts"] > 0)
+    )
+    indirect_difference = np.where(
+        paired_counts,
+        indirect_means - c_indirect_means,
+        np.nan,
+    )
 
     by_abbreviation = prefix.with_name(prefix.name + "_by_abbreviation.csv")
     with by_abbreviation.open("w", newline="", encoding="utf-8") as handle:
@@ -542,7 +562,11 @@ def write_summaries(
         )
         writer.writerow(
             ["ABBR", *location_columns, "patched_logit_difference",
-             "indirect_effect", "normalized_restoration", "count"]
+             "indirect_effect", "normalized_restoration",
+             "c_to_b_patched_logit_difference", "c_to_b_indirect_effect",
+             "c_to_b_normalized_restoration",
+             "indirect_effect_difference_a_minus_c",
+             "count", "c_to_b_count"]
         )
         for abbreviation_index, abbreviation in enumerate(abbreviations):
             for layer, head in all_conditions(intervention):
@@ -556,7 +580,10 @@ def write_summaries(
                     [
                         abbreviation, *location, patched_means[index],
                         indirect_means[index], normalized_means[index],
+                        c_patched_means[index], c_indirect_means[index],
+                        c_normalized_means[index], indirect_difference[index],
                         accumulator["effect_counts"][index],
+                        accumulator["c_effect_counts"][index],
                     ]
                 )
 
@@ -569,7 +596,10 @@ def write_summaries(
         )
         writer.writerow(
             [*location_columns, "patched_logit_difference",
-             "indirect_effect", "normalized_restoration"]
+             "indirect_effect", "normalized_restoration",
+             "c_to_b_patched_logit_difference", "c_to_b_indirect_effect",
+             "c_to_b_normalized_restoration",
+             "indirect_effect_difference_a_minus_c"]
         )
         for layer, head in all_conditions(intervention):
             cell = (
@@ -581,9 +611,15 @@ def write_summaries(
             writer.writerow(
                 [
                     *location,
-                    np.nanmean(patched_means[cell][valid_abbreviations]),
-                    np.nanmean(indirect_means[cell][valid_abbreviations]),
-                    np.nanmean(normalized_means[cell][valid_abbreviations]),
+                    nanmean_or_nan(patched_means[cell][valid_abbreviations]),
+                    nanmean_or_nan(indirect_means[cell][valid_abbreviations]),
+                    nanmean_or_nan(normalized_means[cell][valid_abbreviations]),
+                    nanmean_or_nan(c_patched_means[cell][valid_abbreviations]),
+                    nanmean_or_nan(c_indirect_means[cell][valid_abbreviations]),
+                    nanmean_or_nan(c_normalized_means[cell][valid_abbreviations]),
+                    nanmean_or_nan(
+                        indirect_difference[cell][valid_abbreviations]
+                    ),
                 ]
             )
 
@@ -609,12 +645,283 @@ def write_summaries(
                 "processed_rows": int(np.sum(accumulator["status"] == 1)),
                 "skipped_rows": int(np.sum(accumulator["status"] == 2)),
                 "pending_rows": int(np.sum(accumulator["status"] == 0)),
+                "c_to_b_processed_rows": int(
+                    np.sum(accumulator["c_status"] == 1)
+                ),
+                "c_to_b_skipped_rows": int(
+                    np.sum(accumulator["c_status"] == 2)
+                ),
+                "c_to_b_pending_rows": int(
+                    np.sum(accumulator["c_status"] == 0)
+                ),
                 "skip_reasons": accumulator["skip_reasons"],
             },
             indent=2,
         ),
         encoding="utf-8",
     )
+
+
+def macro_average_attention(
+    sums: np.ndarray,
+    counts: np.ndarray,
+    valid_abbreviations: np.ndarray,
+) -> np.ndarray:
+    abbreviation_means = safe_average(sums, counts)
+    values = abbreviation_means[valid_abbreviations]
+    finite = np.isfinite(values)
+    return np.divide(
+        np.nansum(values, axis=0),
+        finite.sum(axis=0),
+        out=np.full(values.shape[1:], np.nan, dtype=np.float64),
+        where=finite.sum(axis=0) != 0,
+    )
+
+
+def plot_attention_heatmaps(
+    prefix: Path,
+    accumulator: dict[str, Any],
+) -> list[Path]:
+    """Plot global layer-by-head heatmaps from the accumulated results."""
+    valid_abbreviations = accumulator["baseline_counts"] > 0
+    if not np.any(valid_abbreviations):
+        print("No processed results are available for heatmaps")
+        return []
+
+    a_indirect = safe_average(
+        accumulator["indirect_sums"], accumulator["effect_counts"]
+    )
+    c_indirect = safe_average(
+        accumulator["c_indirect_sums"], accumulator["c_effect_counts"]
+    )
+    paired = (
+        (accumulator["effect_counts"] == accumulator["c_effect_counts"])
+        & (accumulator["effect_counts"] > 0)
+    )
+    metrics = {
+        "normalized_restoration": macro_average_attention(
+            accumulator["normalized_sums"],
+            accumulator["normalized_counts"],
+            valid_abbreviations,
+        ),
+        "patched_logit_difference": macro_average_attention(
+            accumulator["patched_sums"],
+            accumulator["effect_counts"],
+            valid_abbreviations,
+        ),
+        "indirect_effect": macro_average_attention(
+            accumulator["indirect_sums"],
+            accumulator["effect_counts"],
+            valid_abbreviations,
+        ),
+        "c_to_b_indirect_effect": macro_average_attention(
+            accumulator["c_indirect_sums"],
+            accumulator["c_effect_counts"],
+            valid_abbreviations,
+        ),
+        "indirect_effect_difference_a_minus_c": macro_average_attention(
+            np.where(paired, a_indirect - c_indirect, 0.0),
+            paired.astype(np.int64),
+            valid_abbreviations,
+        ),
+    }
+    titles = {
+        "normalized_restoration": "Attention-head normalized restoration",
+        "patched_logit_difference": "Attention-head patched logit difference",
+        "indirect_effect": "Attention-head indirect effect",
+        "c_to_b_indirect_effect": "Attention-head C→B indirect effect",
+        "indirect_effect_difference_a_minus_c": (
+            "Attention-head IE difference: A→B minus C→B"
+        ),
+    }
+
+    output_paths: list[Path] = []
+    for metric_name, values in metrics.items():
+        finite_values = values[np.isfinite(values)]
+        if metric_name == "patched_logit_difference":
+            cmap = "viridis"
+            center = None
+            vmin = float(np.min(finite_values)) if finite_values.size else 0.0
+            vmax = float(np.max(finite_values)) if finite_values.size else 1.0
+            if vmin == vmax:
+                vmax = vmin + 1.0
+        else:
+            cmap = "RdBu_r"
+            center = 0
+            limit = (
+                float(np.max(np.abs(finite_values)))
+                if finite_values.size
+                else 1.0
+            )
+            if limit == 0:
+                limit = 1.0
+            vmin, vmax = -limit, limit
+
+        figure, axis = plt.subplots(figsize=(14, 10))
+        sns.heatmap(
+            values,
+            ax=axis,
+            cmap=cmap,
+            center=center,
+            vmin=vmin,
+            vmax=vmax,
+            xticklabels=np.arange(N_HEADS),
+            yticklabels=np.arange(N_LAYERS),
+            cbar_kws={"label": metric_name.replace("_", " ").title()},
+        )
+        axis.set_xlabel("Attention head")
+        axis.set_ylabel("Layer")
+        axis.set_title(titles[metric_name])
+        axis.tick_params(axis="y", rotation=0)
+        figure.tight_layout()
+
+        output_path = prefix.with_name(prefix.name + f"_{metric_name}_heatmap.png")
+        figure.savefig(output_path, dpi=300, bbox_inches="tight")
+        plt.close(figure)
+        output_paths.append(output_path)
+
+    return output_paths
+
+
+def plot_mlp_results(
+    prefix: Path,
+    abbreviations: list[str],
+    accumulator: dict[str, Any],
+) -> list[Path]:
+    """Plot global MLP layer lines and abbreviation-by-layer heatmaps."""
+    valid_mask = accumulator["baseline_counts"] > 0
+    if not np.any(valid_mask):
+        print("No processed MLP results are available for plots")
+        return []
+
+    valid_abbreviations = np.asarray(abbreviations)[valid_mask]
+    a_indirect = safe_average(
+        accumulator["indirect_sums"], accumulator["effect_counts"]
+    )
+    c_indirect = safe_average(
+        accumulator["c_indirect_sums"], accumulator["c_effect_counts"]
+    )
+    paired = (
+        (accumulator["effect_counts"] == accumulator["c_effect_counts"])
+        & (accumulator["effect_counts"] > 0)
+    )
+    metrics = {
+        "normalized_restoration": safe_average(
+            accumulator["normalized_sums"],
+            accumulator["normalized_counts"],
+        )[valid_mask],
+        "patched_logit_difference": safe_average(
+            accumulator["patched_sums"],
+            accumulator["effect_counts"],
+        )[valid_mask],
+        "indirect_effect": safe_average(
+            accumulator["indirect_sums"],
+            accumulator["effect_counts"],
+        )[valid_mask],
+        "c_to_b_indirect_effect": c_indirect[valid_mask],
+        "indirect_effect_difference_a_minus_c": np.where(
+            paired, a_indirect - c_indirect, np.nan
+        )[valid_mask],
+    }
+    titles = {
+        "normalized_restoration": "MLP normalized restoration",
+        "patched_logit_difference": "MLP patched logit difference",
+        "indirect_effect": "MLP indirect effect",
+        "c_to_b_indirect_effect": "MLP C→B indirect effect",
+        "indirect_effect_difference_a_minus_c": (
+            "MLP IE difference: A→B minus C→B"
+        ),
+    }
+    baseline_means = safe_average(
+        accumulator["baseline_sums"],
+        accumulator["baseline_counts"][:, None],
+    )[valid_mask]
+
+    output_paths: list[Path] = []
+    layers = np.arange(N_LAYERS)
+    for metric_name, values in metrics.items():
+        global_mean = np.array(
+            [nanmean_or_nan(values[:, layer]) for layer in layers]
+        )
+
+        figure, axis = plt.subplots(figsize=(12, 6))
+        axis.plot(layers, global_mean, marker="o", linewidth=2, markersize=4)
+        axis.axhline(0, color="black", linewidth=1, linestyle="--", alpha=0.6)
+        if metric_name == "patched_logit_difference":
+            sentence_a_mean = nanmean_or_nan(baseline_means[:, 0])
+            sentence_b_mean = nanmean_or_nan(baseline_means[:, 1])
+            axis.axhline(
+                sentence_a_mean,
+                color="green",
+                linestyle=":",
+                label="Sentence A baseline",
+            )
+            axis.axhline(
+                sentence_b_mean,
+                color="orange",
+                linestyle=":",
+                label="Sentence B baseline",
+            )
+            axis.legend()
+        axis.set_xlabel("Layer")
+        axis.set_ylabel(metric_name.replace("_", " ").title())
+        axis.set_title(titles[metric_name])
+        axis.set_xticks(layers)
+        axis.grid(alpha=0.25)
+        figure.tight_layout()
+
+        line_path = prefix.with_name(prefix.name + f"_{metric_name}_line.png")
+        figure.savefig(line_path, dpi=300, bbox_inches="tight")
+        plt.close(figure)
+        output_paths.append(line_path)
+
+        finite_values = values[np.isfinite(values)]
+        if metric_name == "patched_logit_difference":
+            cmap = "viridis"
+            center = None
+            vmin = float(np.min(finite_values)) if finite_values.size else 0.0
+            vmax = float(np.max(finite_values)) if finite_values.size else 1.0
+            if vmin == vmax:
+                vmax = vmin + 1.0
+        else:
+            cmap = "RdBu_r"
+            center = 0
+            limit = (
+                float(np.max(np.abs(finite_values)))
+                if finite_values.size
+                else 1.0
+            )
+            if limit == 0:
+                limit = 1.0
+            vmin, vmax = -limit, limit
+
+        figure_height = max(8.0, 0.22 * len(valid_abbreviations))
+        figure, axis = plt.subplots(figsize=(14, figure_height))
+        sns.heatmap(
+            values,
+            ax=axis,
+            cmap=cmap,
+            center=center,
+            vmin=vmin,
+            vmax=vmax,
+            xticklabels=layers,
+            yticklabels=valid_abbreviations,
+            cbar_kws={"label": metric_name.replace("_", " ").title()},
+        )
+        axis.set_xlabel("Layer")
+        axis.set_ylabel("Abbreviation")
+        axis.set_title(titles[metric_name] + " by abbreviation")
+        axis.tick_params(axis="y", rotation=0, labelsize=7)
+        figure.tight_layout()
+
+        heatmap_path = prefix.with_name(
+            prefix.name + f"_{metric_name}_abbreviation_layer_heatmap.png"
+        )
+        figure.savefig(heatmap_path, dpi=300, bbox_inches="tight")
+        plt.close(figure)
+        output_paths.append(heatmap_path)
+
+    return output_paths
 
 
 def validate_rows(rows: list[dict[str, str]]) -> tuple[int, dict[int, str]]:
@@ -701,12 +1008,35 @@ def run(args: argparse.Namespace) -> None:
         "d_head": D_HEAD,
         "abbreviations": abbreviations,
     }
+    if args.plot_only and not accumulator_path.exists():
+        raise FileNotFoundError(
+            f"Cannot use --plot-only because {accumulator_path} does not exist"
+        )
     accumulator = load_accumulator(
         accumulator_path, len(rows), len(abbreviations), metadata, result_shape
     )
+    # Older runs marked every runtime failure as permanently skipped. Reset
+    # those rows so transient failures (for example, a device mismatch) retry.
+    for row_index in np.flatnonzero(accumulator["status"] == 2):
+        if int(row_index) not in validation_failures:
+            accumulator["status"][row_index] = 0
+            accumulator["skip_reasons"].pop(str(int(row_index)), None)
     abbreviation_to_index = {
         abbreviation: index for index, abbreviation in enumerate(abbreviations)
     }
+    if args.plot_only:
+        write_summaries(
+            output_prefix, args.intervention, abbreviations, accumulator
+        )
+        plots = (
+            plot_attention_heatmaps(output_prefix, accumulator)
+            if args.intervention == "attention_head"
+            else plot_mlp_results(output_prefix, abbreviations, accumulator)
+        )
+        for plot in plots:
+            print(f"Plot: {plot}")
+        return
+
     model = load_model(model_id, args.device_map, cache_dtype)
 
     stop = (
@@ -714,9 +1044,12 @@ def run(args: argparse.Namespace) -> None:
         if args.max_rows == 0
         else min(len(rows), args.start_row + args.max_rows)
     )
-    completed_this_run = 0
+    completed_a_this_run = 0
+    completed_c_this_run = 0
     for row_index in range(args.start_row, stop):
-        if accumulator["status"][row_index] != 0:
+        needs_a = accumulator["status"][row_index] == 0
+        needs_c = accumulator["c_status"][row_index] == 0
+        if not needs_a and not needs_c:
             continue
         row = rows[row_index]
         abbreviation = row["ABBR"].strip()
@@ -726,60 +1059,128 @@ def run(args: argparse.Namespace) -> None:
         try:
             if row_index in validation_failures:
                 raise ValueError(validation_failures[row_index])
-            context_a, context_b, source_index, target_index = locate_patch_tokens(
+            context_a, context_b, source_a_index, target_index = locate_patch_tokens(
                 model.tokenizer, row
             )
-            context_c = build_context(row["Sentence_C"], abbreviation)
             primary = row["Primary_Expression"].strip()
             alternative = row["Alternative_Expression"].strip()
-            baseline = np.array(
-                [
+            context_c, source_c_index = locate_source_token(
+                model.tokenizer,
+                row["Sentence_C"],
+                alternative,
+                abbreviation,
+            )
+
+            if needs_a:
+                baseline = np.array([
                     baseline_logit_difference(
                         model, context, primary, alternative, args.answer_reduction
                     )
                     for context in (context_a, context_b, context_c)
-                ],
-                dtype=np.float64,
-            )
-            clean_activations = capture_clean_activations(
-                model, args.intervention, context_a, source_index, cache_dtype
-            )
-            patched = evaluate_patches(
-                model, args.intervention, context_b, primary, alternative,
-                target_index, clean_activations, args.answer_reduction,
-                args.patch_batch_size
-            )
-            indirect = patched - baseline[1]
-            total_effect = baseline[0] - baseline[1]
-            normalized = (
-                indirect / total_effect
-                if abs(total_effect) >= args.min_total_effect
-                else np.full_like(indirect, np.nan)
-            )
+                ], dtype=np.float64)
+            else:
+                baseline = np.array([
+                    np.nan,
+                    baseline_logit_difference(
+                        model, context_b, primary, alternative,
+                        args.answer_reduction
+                    ),
+                    baseline_logit_difference(
+                        model, context_c, primary, alternative,
+                        args.answer_reduction
+                    ),
+                ], dtype=np.float64)
 
-            accumulator["baseline_sums"][abbreviation_index] += baseline
-            accumulator["baseline_counts"][abbreviation_index] += 1
-            accumulator["patched_sums"][abbreviation_index] += patched
-            accumulator["indirect_sums"][abbreviation_index] += indirect
-            accumulator["effect_counts"][abbreviation_index] += 1
-            finite = np.isfinite(normalized)
-            accumulator["normalized_sums"][abbreviation_index][finite] += (
-                normalized[finite]
-            )
-            accumulator["normalized_counts"][abbreviation_index][finite] += 1
-            accumulator["status"][row_index] = 1
-            completed_this_run += 1
-        except (ValueError, RuntimeError, IndexError) as error:
+            if needs_a:
+                clean_a = capture_clean_activations(
+                    model, args.intervention, context_a,
+                    source_a_index, cache_dtype
+                )
+                patched_a = evaluate_patches(
+                    model, args.intervention, context_b, primary, alternative,
+                    target_index, clean_a, args.answer_reduction,
+                    args.patch_batch_size
+                )
+                indirect_a = patched_a - baseline[1]
+                total_effect_a = baseline[0] - baseline[1]
+                normalized_a = (
+                    indirect_a / total_effect_a
+                    if abs(total_effect_a) >= args.min_total_effect
+                    else np.full_like(indirect_a, np.nan)
+                )
+
+            if needs_c:
+                clean_c = capture_clean_activations(
+                    model, args.intervention, context_c,
+                    source_c_index, cache_dtype
+                )
+                patched_c = evaluate_patches(
+                    model, args.intervention, context_b, primary, alternative,
+                    target_index, clean_c, args.answer_reduction,
+                    args.patch_batch_size
+                )
+                indirect_c = patched_c - baseline[1]
+                total_effect_c = baseline[2] - baseline[1]
+                normalized_c = (
+                    indirect_c / total_effect_c
+                    if abs(total_effect_c) >= args.min_total_effect
+                    else np.full_like(indirect_c, np.nan)
+                )
+
+            if needs_a:
+                accumulator["baseline_sums"][abbreviation_index] += baseline
+                accumulator["baseline_counts"][abbreviation_index] += 1
+                accumulator["patched_sums"][abbreviation_index] += patched_a
+                accumulator["indirect_sums"][abbreviation_index] += indirect_a
+                accumulator["effect_counts"][abbreviation_index] += 1
+                finite_a = np.isfinite(normalized_a)
+                accumulator["normalized_sums"][abbreviation_index][finite_a] += (
+                    normalized_a[finite_a]
+                )
+                accumulator["normalized_counts"][abbreviation_index][finite_a] += 1
+                accumulator["status"][row_index] = 1
+                completed_a_this_run += 1
+
+            if needs_c:
+                accumulator["c_patched_sums"][abbreviation_index] += patched_c
+                accumulator["c_indirect_sums"][abbreviation_index] += indirect_c
+                accumulator["c_effect_counts"][abbreviation_index] += 1
+                finite_c = np.isfinite(normalized_c)
+                accumulator["c_normalized_sums"][abbreviation_index][finite_c] += (
+                    normalized_c[finite_c]
+                )
+                accumulator["c_normalized_counts"][abbreviation_index][finite_c] += 1
+                accumulator["c_status"][row_index] = 1
+                completed_c_this_run += 1
+        except ValueError as error:
             print(f"  skipped: {error}")
-            accumulator["status"][row_index] = 2
+            if needs_a:
+                accumulator["status"][row_index] = 2
+            if needs_c:
+                accumulator["c_status"][row_index] = 2
             accumulator["skip_reasons"][str(row_index)] = str(error)
+        except (RuntimeError, IndexError) as error:
+            print(f"  runtime failure; row will be retried: {error}")
+            if needs_a:
+                accumulator["status"][row_index] = 0
+            if needs_c:
+                accumulator["c_status"][row_index] = 0
+            accumulator["skip_reasons"].pop(str(row_index), None)
 
         save_accumulator(accumulator_path, accumulator)
         write_summaries(
             output_prefix, args.intervention, abbreviations, accumulator
         )
 
-    print(f"Processed {completed_this_run} new rows")
+    if args.intervention == "attention_head":
+        plots = plot_attention_heatmaps(output_prefix, accumulator)
+    else:
+        plots = plot_mlp_results(output_prefix, abbreviations, accumulator)
+    for plot in plots:
+        print(f"Plot: {plot}")
+
+    print(f"Processed {completed_a_this_run} new A→B rows")
+    print(f"Processed {completed_c_this_run} new C→B rows")
     print(f"Accumulator: {accumulator_path}")
     print(f"Summaries: {output_prefix}_*.csv")
 

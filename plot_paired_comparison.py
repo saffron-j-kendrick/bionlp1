@@ -45,6 +45,11 @@ def load_per_sentence(model_id):
     path = f'data/all_sim_diff_full_{stem(model_id)}_test_with_difference.npy'
     return np.load(path) if os.path.exists(path) else None
 
+def load_cka_diff(model_id):
+    """Combined CKA difference per layer — shape (num_layers,)."""
+    path = f'data/CKA_12_full_diff_{stem(model_id)}_test_with_difference.npy'
+    return np.load(path) if os.path.exists(path) else None
+
 def sig_stars(p):
     """Convert a raw p-value to an asterisk string."""
     if p < 0.001: return '***'
@@ -94,10 +99,6 @@ PAIRS = [
     (
         'google-bert/bert-base-cased',          'BERT-base-cased',       'steelblue',
         'dmis-lab/biobert-base-cased-v1.2',    'BioBERT',               'darkorange',
-    ),
-    (
-        'openai-community/gpt2-medium',         'GPT-2-medium',          'steelblue',
-        'healx/gpt-2-pubmed-medium',            'GPT-2-pubmed-medium',   'darkorange',
     ),
     (
         'answerdotai/ModernBERT-base',          'ModernBERT-base',       'steelblue',
@@ -228,4 +229,102 @@ _overlay_figure(
     BASE_MODELS,
     "Combined Cosine Similarity Difference — All Base/General Models",
     "AllBaseModels_combined_diff",
+)
+
+
+def _paired_cka_figure():
+    """Plot the combined CKA-difference curves for each base/biomedical pair."""
+    fig_cka, axes_cka = plt.subplots(
+        2, 4,
+        figsize=(ACL_TEXT_WIDTH * 2.0, ACL_RSA_HEIGHT * 1.2),
+        constrained_layout=True,
+    )
+
+    flat_axes = axes_cka.flatten()
+    for ax, (id1, lbl1, col1, id2, lbl2, col2) in zip(flat_axes, PAIRS):
+        cka1 = load_cka_diff(id1)
+        cka2 = load_cka_diff(id2)
+
+        if cka1 is None and cka2 is None:
+            ax.text(
+                0.5, 0.5, 'Data not yet available',
+                ha='center', va='center', transform=ax.transAxes,
+                fontsize=8, color='grey',
+            )
+        else:
+            for values, label, colour in (
+                (cka1, lbl1, col1),
+                (cka2, lbl2, col2),
+            ):
+                if values is not None:
+                    layers = np.arange(1, len(values) + 1)
+                    ax.plot(layers, values, label=label, color=colour)
+            ax.legend(loc='best', framealpha=0.7)
+
+        ax.axhline(0, color='black', linewidth=0.6, linestyle='--', alpha=0.5)
+        ax.set_title(f'{lbl1}  vs  {lbl2}')
+        ax.set_xlabel('Layer')
+        ax.set_ylabel('Combined CKA Difference')
+        ax.xaxis.set_major_locator(ticker.MaxNLocator(integer=True, nbins=8))
+
+    for ax in flat_axes[len(PAIRS):]:
+        ax.set_visible(False)
+
+    fig_cka.suptitle(
+        "Combined CKA Difference by Layer — General vs Biomedical Models",
+        fontsize=8, y=1.02,
+    )
+    filename_stem = 'PairedComparison_CKA_combined_diff'
+    fig_cka.savefig(f'figures/{filename_stem}.png', dpi=150, bbox_inches='tight')
+    fig_cka.savefig(f'figures/{filename_stem}.pdf', bbox_inches='tight')
+    fig_cka.savefig(f'figures/{filename_stem}.eps', bbox_inches='tight')
+    plt.show()
+    plt.close(fig_cka)
+    print(f"Saved to figures/{filename_stem}.{{png,pdf,eps}}")
+
+
+def _cka_overlay_figure(model_list, title, filename_stem):
+    """Plot combined CKA-difference curves for a collection of models."""
+    n = len(model_list)
+    colours = [cm.tab10(i / n) for i in range(n)]
+    fig_cka, ax_cka = plt.subplots(
+        figsize=(ACL_TEXT_WIDTH * 1.4, ACL_RSA_HEIGHT * 1.1),
+        constrained_layout=True,
+    )
+
+    for (model_id, label), colour in zip(model_list, colours):
+        values = load_cka_diff(model_id)
+        if values is None:
+            print(f"  Skipping {label} — CKA data not found")
+            continue
+        layers = np.arange(1, len(values) + 1)
+        ax_cka.plot(layers, values, label=label, color=colour)
+
+    ax_cka.axhline(0, color='black', linewidth=0.6, linestyle='--', alpha=0.5)
+    ax_cka.set_xlabel('Layer')
+    ax_cka.set_ylabel('Combined CKA Difference')
+    ax_cka.set_title(title, fontsize=8)
+    ax_cka.xaxis.set_major_locator(ticker.MaxNLocator(integer=True, nbins=10))
+    ax_cka.legend(loc='best', framealpha=0.7)
+
+    fig_cka.savefig(f'figures/{filename_stem}.png', dpi=150, bbox_inches='tight')
+    fig_cka.savefig(f'figures/{filename_stem}.pdf', bbox_inches='tight')
+    fig_cka.savefig(f'figures/{filename_stem}.eps', bbox_inches='tight')
+    plt.show()
+    plt.close(fig_cka)
+    print(f"Saved to figures/{filename_stem}.{{png,pdf,eps}}")
+
+
+_paired_cka_figure()
+
+_cka_overlay_figure(
+    BASE_MODELS,
+    "Combined CKA Difference — All Base/General Models",
+    "AllBaseModels_CKA_combined_diff",
+)
+
+_cka_overlay_figure(
+    BIO_MODELS,
+    "Combined CKA Difference — All Biomedical Models",
+    "AllBioModels_CKA_combined_diff",
 )

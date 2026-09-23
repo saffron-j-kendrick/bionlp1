@@ -1,20 +1,16 @@
-#!/usr/bin/env python3
-"""Compute and plot example-level diagnostics for selected ADAM components."""
+## IMPORTS
 
 from __future__ import annotations
-
 import argparse
 import csv
 import json
 import os
 from pathlib import Path
 from typing import Any
-
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 import torch
-
 import adam_data_patching as patching
 
 
@@ -23,69 +19,22 @@ MLP_LAYERS = [0, 14, 31]
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--dataset",
-        type=Path,
-        default=Path("adam_dataset_patching_filled.csv"),
-    )
-    parser.add_argument(
-        "--model",
-        choices=tuple(patching.MODEL_CONFIGS),
-        default="llama8b",
-    )
+    parser.add_argument("--dataset", type=Path, default=Path("adam_dataset_patching_filled.csv"))
+    parser.add_argument("--model", choices=tuple(patching.MODEL_CONFIGS), default="llama8b")
     parser.add_argument("--start-row", type=int, default=0)
-    parser.add_argument(
-        "--max-rows",
-        type=int,
-        default=0,
-        help="number of rows to process; 0 means all remaining rows",
-    )
-    parser.add_argument(
-        "--answer-reduction",
-        choices=("mean", "sum"),
-        default="mean",
-    )
-    parser.add_argument(
-        "--cache-dtype",
-        choices=("float32", "float16", "bfloat16"),
-        default="bfloat16",
-    )
+    parser.add_argument("--max-rows", type=int, default=0, help="number of rows to process; 0 means all remaining rows")
+    parser.add_argument("--answer-reduction", choices=("mean", "sum"), default="mean")
+    parser.add_argument("--cache-dtype", choices=("float32", "float16", "bfloat16"), default="bfloat16")
     parser.add_argument("--device-map", default="auto")
     parser.add_argument("--min-total-effect", type=float, default=1e-6)
-    parser.add_argument(
-        "--attention-global",
-        type=Path,
-        help="global attention CSV used to select the strongest negative head",
-    )
-    parser.add_argument(
-        "--attention-status",
-        type=Path,
-        help="attention status JSON used to check whether selection is final",
-    )
-    parser.add_argument(
-        "--allow-partial-selection",
-        action="store_true",
-        help="allow head selection from an unfinished attention run",
-    )
-    parser.add_argument(
-        "--num-negative-heads",
-        type=int,
-        default=2,
-        help="number of most-negative heads selected automatically (default: 2)",
-    )
-    parser.add_argument(
-        "--num-positive-heads",
-        type=int,
-        default=2,
-        help="number of most-positive heads selected automatically (default: 2)",
-    )
+    parser.add_argument("--attention-global", type=Path, help="global attention CSV used to select the strongest negative head")
+    parser.add_argument("--attention-status", type=Path, help="attention status JSON used to check whether selection is final")
+    parser.add_argument("--allow-partial-selection", action="store_true", help="allow head selection from an unfinished attention run")
+    parser.add_argument("--num-negative-heads", type=int, default=2, help="number of most-negative heads selected automatically (default: 2)")
+    parser.add_argument("--num-positive-heads", type=int, default=2, help="number of most-positive heads selected automatically (default: 2)")
     parser.add_argument("--accumulator", type=Path)
     parser.add_argument("--output-prefix", type=Path)
-    parser.add_argument(
-        "--plot-only",
-        action="store_true",
-        help="plot an existing diagnostics accumulator without loading a model",
-    )
+    parser.add_argument("--plot-only", action="store_true", help="plot an existing diagnostics accumulator without loading a model")
     return parser.parse_args()
 
 

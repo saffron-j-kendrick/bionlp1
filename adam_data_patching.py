@@ -4,7 +4,7 @@
 # Sentence A : "... abdominal aortic aneurysm"
 # Sentence B : "... AAA"
 # Sentence C : "... aromatic amino acids"
-# I want to patch the activation of "aneurysm" in Sentence A to "AAA" into sentence B and then ask the model what does "AAA" mean, abdominal aortic aneurysm or aromatic amino acids?
+# I want to patch the activation of "aneurysm" in Sentence A to "AAA" into sentence B and then ask the model what does the abbreviation mean, abdominal aortic aneurysm or aromatic amino acids?
 # I also patch the final token of Sentence C's alternative expression into the same Sentence B abbreviation token and compare the two indirect effects.
 # I want to measure the logit difference between choosing the correct answer and the incorrect answer before and after the patching.
 # I also want to measure Total Indirect Effect (TIE) before and after the patching.
@@ -49,14 +49,7 @@ N_LAYERS: int
 N_HEADS: int
 D_HEAD: int
 BASELINE_NAMES = ("sentence_a", "sentence_b", "sentence_c")
-REQUIRED_COLUMNS = {
-    "ABBR",
-    "Sentence_A",
-    "Sentence_B",
-    "Sentence_C",
-    "Primary_Expression",
-    "Alternative_Expression",
-}
+REQUIRED_COLUMNS = {"ABBR", "Sentence_A", "Sentence_B", "Sentence_C", "Primary_Expression", "Alternative_Expression"}
 
 
 def parse_args() -> argparse.Namespace:
@@ -106,7 +99,7 @@ def dataset_fingerprint(path: Path) -> str:
 def build_context(sentence: str, abbreviation: str) -> str:
     return (
         f"{sentence}\n\n"
-        f'Question: In the sentence above, what does abbreviationstand for?\n'
+        f'Question: In the sentence above, what does abbreviation stand for?\n'
         "Answer:"
     )
 
@@ -417,6 +410,10 @@ def new_accumulator(
         "c_normalized_sums": np.zeros(shape, dtype=np.float64),
         "c_effect_counts": np.zeros(shape, dtype=np.int64),
         "c_normalized_counts": np.zeros(shape, dtype=np.int64),
+        "b_status": np.zeros(row_count, dtype=np.uint8),
+        "b_patched_sums": np.zeros(shape, dtype=np.float64),
+        "b_indirect_sums": np.zeros(shape, dtype=np.float64),
+        "b_effect_counts": np.zeros(shape, dtype=np.int64),
         "skip_reasons": {},
     }
 
@@ -465,6 +462,21 @@ def load_accumulator(
                 if key in data
                 else np.zeros(shape, dtype=dtype)
             )
+        accumulator["b_status"] = (
+            data["b_status"].copy()
+            if "b_status" in data
+            else np.zeros(row_count, dtype=np.uint8)
+        )
+        for key, dtype in (
+            ("b_patched_sums", np.float64),
+            ("b_indirect_sums", np.float64),
+            ("b_effect_counts", np.int64),
+        ):
+            accumulator[key] = (
+                data[key].copy()
+                if key in data
+                else np.zeros(shape, dtype=dtype)
+            )
         accumulator["metadata"] = saved_metadata
         accumulator["skip_reasons"] = json.loads(
             str(data["skip_reasons"].item())
@@ -493,6 +505,10 @@ def save_accumulator(path: Path, accumulator: dict[str, Any]) -> None:
             c_normalized_sums=accumulator["c_normalized_sums"],
             c_effect_counts=accumulator["c_effect_counts"],
             c_normalized_counts=accumulator["c_normalized_counts"],
+            b_status=accumulator["b_status"],
+            b_patched_sums=accumulator["b_patched_sums"],
+            b_indirect_sums=accumulator["b_indirect_sums"],
+            b_effect_counts=accumulator["b_effect_counts"],
             skip_reasons=np.array(json.dumps(accumulator["skip_reasons"])),
         )
     os.replace(temporary, path)
@@ -514,11 +530,52 @@ def nanmean_or_nan(values: np.ndarray) -> float:
     return float(np.mean(finite_values))
 
 
+def nanmedian_or_nan(values: np.ndarray) -> float:
+    finite_values = values[np.isfinite(values)]
+    if finite_values.size == 0:
+        return float("nan")
+    return float(np.median(finite_values))
+
+
+def directional_probability(values: np.ndarray, positive: bool) -> float:
+    """Fraction of finite abbreviation-level values in the requested direction."""
+    finite_values = values[np.isfinite(values)]
+    if finite_values.size == 0:
+        return float("nan")
+    return float(np.mean(finite_values > 0 if positive else finite_values < 0))
+
+
+def bootstrap_mean_interval(
+    values: np.ndarray,
+    n_resamples: int = 5000,
+    seed: int = 0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Bootstrap macro means by resampling abbreviation-level values."""
+    flat_values = values.reshape(values.shape[0], -1)
+    complete = np.all(np.isfinite(flat_values), axis=1)
+    usable = flat_values[complete]
+    output_shape = values.shape[1:]
+    if usable.shape[0] == 0:
+        empty = np.full(output_shape, np.nan, dtype=np.float64)
+        return empty.copy(), empty.copy()
+
+    rng = np.random.default_rng(seed)
+    sample_weights = rng.multinomial(
+        usable.shape[0],
+        np.full(usable.shape[0], 1.0 / usable.shape[0]),
+        size=n_resamples,
+    )
+    bootstrap_means = sample_weights @ usable / usable.shape[0]
+    lower, upper = np.percentile(bootstrap_means, [2.5, 97.5], axis=0)
+    return lower.reshape(output_shape), upper.reshape(output_shape)
+
+
 def write_summaries(
     prefix: Path,
     intervention: str,
     abbreviations: list[str],
     accumulator: dict[str, Any],
+    include_bootstrap: bool = False,
 ) -> None:
     prefix.parent.mkdir(parents=True, exist_ok=True)
     baseline_means = safe_average(
@@ -544,6 +601,12 @@ def write_summaries(
         accumulator["c_normalized_sums"],
         accumulator["c_normalized_counts"],
     )
+    b_patched_means = safe_average(
+        accumulator["b_patched_sums"], accumulator["b_effect_counts"]
+    )
+    b_indirect_means = safe_average(
+        accumulator["b_indirect_sums"], accumulator["b_effect_counts"]
+    )
     paired_counts = (
         (accumulator["effect_counts"] == accumulator["c_effect_counts"])
         & (accumulator["effect_counts"] > 0)
@@ -565,8 +628,9 @@ def write_summaries(
              "indirect_effect", "normalized_restoration",
              "c_to_b_patched_logit_difference", "c_to_b_indirect_effect",
              "c_to_b_normalized_restoration",
+             "b_to_b_patched_logit_difference", "b_to_b_indirect_effect",
              "indirect_effect_difference_a_minus_c",
-             "count", "c_to_b_count"]
+             "count", "c_to_b_count", "b_to_b_count"]
         )
         for abbreviation_index, abbreviation in enumerate(abbreviations):
             for layer, head in all_conditions(intervention):
@@ -581,9 +645,12 @@ def write_summaries(
                         abbreviation, *location, patched_means[index],
                         indirect_means[index], normalized_means[index],
                         c_patched_means[index], c_indirect_means[index],
-                        c_normalized_means[index], indirect_difference[index],
+                        c_normalized_means[index],
+                        b_patched_means[index], b_indirect_means[index],
+                        indirect_difference[index],
                         accumulator["effect_counts"][index],
                         accumulator["c_effect_counts"][index],
+                        accumulator["b_effect_counts"][index],
                     ]
                 )
 
@@ -599,8 +666,24 @@ def write_summaries(
              "indirect_effect", "normalized_restoration",
              "c_to_b_patched_logit_difference", "c_to_b_indirect_effect",
              "c_to_b_normalized_restoration",
-             "indirect_effect_difference_a_minus_c"]
+             "b_to_b_patched_logit_difference", "b_to_b_indirect_effect",
+             "a_to_b_indirect_effect_median",
+             "c_to_b_indirect_effect_median",
+             "b_to_b_indirect_effect_median",
+             "indirect_effect_difference_a_minus_c",
+             "indirect_effect_difference_a_minus_c_median",
+             "p_ie_a_gt_zero", "p_ie_c_lt_zero", "p_ie_delta_gt_zero",
+             "delta_ie_bootstrap_ci_2_5", "delta_ie_bootstrap_ci_97_5",
+             "bootstrap_resamples"]
         )
+        if include_bootstrap:
+            bootstrap_low, bootstrap_high = bootstrap_mean_interval(
+                indirect_difference[valid_abbreviations]
+            )
+        else:
+            location_shape = indirect_difference.shape[1:]
+            bootstrap_low = np.full(location_shape, np.nan, dtype=np.float64)
+            bootstrap_high = np.full(location_shape, np.nan, dtype=np.float64)
         for layer, head in all_conditions(intervention):
             cell = (
                 (slice(None), layer, int(head))
@@ -617,9 +700,30 @@ def write_summaries(
                     nanmean_or_nan(c_patched_means[cell][valid_abbreviations]),
                     nanmean_or_nan(c_indirect_means[cell][valid_abbreviations]),
                     nanmean_or_nan(c_normalized_means[cell][valid_abbreviations]),
+                    nanmean_or_nan(b_patched_means[cell][valid_abbreviations]),
+                    nanmean_or_nan(b_indirect_means[cell][valid_abbreviations]),
+                    nanmedian_or_nan(indirect_means[cell][valid_abbreviations]),
+                    nanmedian_or_nan(c_indirect_means[cell][valid_abbreviations]),
+                    nanmedian_or_nan(b_indirect_means[cell][valid_abbreviations]),
                     nanmean_or_nan(
                         indirect_difference[cell][valid_abbreviations]
                     ),
+                    nanmedian_or_nan(
+                        indirect_difference[cell][valid_abbreviations]
+                    ),
+                    directional_probability(
+                        indirect_means[cell][valid_abbreviations], positive=True
+                    ),
+                    directional_probability(
+                        c_indirect_means[cell][valid_abbreviations], positive=False
+                    ),
+                    directional_probability(
+                        indirect_difference[cell][valid_abbreviations],
+                        positive=True,
+                    ),
+                    bootstrap_low[(layer, int(head)) if head is not None else layer],
+                    bootstrap_high[(layer, int(head)) if head is not None else layer],
+                    5000 if include_bootstrap else 0,
                 ]
             )
 
@@ -654,6 +758,15 @@ def write_summaries(
                 "c_to_b_pending_rows": int(
                     np.sum(accumulator["c_status"] == 0)
                 ),
+                "b_to_b_processed_rows": int(
+                    np.sum(accumulator["b_status"] == 1)
+                ),
+                "b_to_b_skipped_rows": int(
+                    np.sum(accumulator["b_status"] == 2)
+                ),
+                "b_to_b_pending_rows": int(
+                    np.sum(accumulator["b_status"] == 0)
+                ),
                 "skip_reasons": accumulator["skip_reasons"],
             },
             indent=2,
@@ -675,6 +788,30 @@ def macro_average_attention(
         finite.sum(axis=0),
         out=np.full(values.shape[1:], np.nan, dtype=np.float64),
         where=finite.sum(axis=0) != 0,
+    )
+
+
+def macro_median_attention(
+    sums: np.ndarray,
+    counts: np.ndarray,
+    valid_abbreviations: np.ndarray,
+) -> np.ndarray:
+    abbreviation_means = safe_average(sums, counts)
+    with np.errstate(all="ignore"):
+        return np.nanmedian(abbreviation_means[valid_abbreviations], axis=0)
+
+
+def directional_probability_map(
+    values: np.ndarray,
+    positive: bool,
+) -> np.ndarray:
+    finite = np.isfinite(values)
+    matches = (values > 0) if positive else (values < 0)
+    return np.divide(
+        np.sum(matches & finite, axis=0),
+        np.sum(finite, axis=0),
+        out=np.full(values.shape[1:], np.nan, dtype=np.float64),
+        where=np.sum(finite, axis=0) != 0,
     )
 
 
@@ -709,30 +846,65 @@ def plot_attention_heatmaps(
             accumulator["effect_counts"],
             valid_abbreviations,
         ),
-        "indirect_effect": macro_average_attention(
+        "a_to_b_indirect_effect_mean": macro_average_attention(
             accumulator["indirect_sums"],
             accumulator["effect_counts"],
             valid_abbreviations,
         ),
-        "c_to_b_indirect_effect": macro_average_attention(
+        "c_to_b_indirect_effect_mean": macro_average_attention(
             accumulator["c_indirect_sums"],
             accumulator["c_effect_counts"],
             valid_abbreviations,
         ),
-        "indirect_effect_difference_a_minus_c": macro_average_attention(
+        "b_to_b_indirect_effect_mean": macro_average_attention(
+            accumulator["b_indirect_sums"],
+            accumulator["b_effect_counts"],
+            valid_abbreviations,
+        ),
+        "a_to_b_indirect_effect_median": macro_median_attention(
+            accumulator["indirect_sums"],
+            accumulator["effect_counts"],
+            valid_abbreviations,
+        ),
+        "c_to_b_indirect_effect_median": macro_median_attention(
+            accumulator["c_indirect_sums"],
+            accumulator["c_effect_counts"],
+            valid_abbreviations,
+        ),
+        "ie_delta_a_minus_c_mean": macro_average_attention(
             np.where(paired, a_indirect - c_indirect, 0.0),
             paired.astype(np.int64),
             valid_abbreviations,
+        ),
+        "ie_delta_a_minus_c_median": macro_median_attention(
+            np.where(paired, a_indirect - c_indirect, 0.0),
+            paired.astype(np.int64),
+            valid_abbreviations,
+        ),
+        "p_ie_a_gt_zero": directional_probability_map(
+            a_indirect[valid_abbreviations], positive=True
+        ),
+        "p_ie_c_lt_zero": directional_probability_map(
+            c_indirect[valid_abbreviations], positive=False
+        ),
+        "p_ie_delta_gt_zero": directional_probability_map(
+            np.where(paired, a_indirect - c_indirect, np.nan)[valid_abbreviations],
+            positive=True,
         ),
     }
     titles = {
         "normalized_restoration": "Attention-head normalized restoration",
         "patched_logit_difference": "Attention-head patched logit difference",
-        "indirect_effect": "Attention-head indirect effect",
-        "c_to_b_indirect_effect": "Attention-head C→B indirect effect",
-        "indirect_effect_difference_a_minus_c": (
-            "Attention-head IE difference: A→B minus C→B"
-        ),
+        "a_to_b_indirect_effect_mean": "Attention-head A→B IE mean",
+        "c_to_b_indirect_effect_mean": "Attention-head C→B IE mean",
+        "b_to_b_indirect_effect_mean": "Attention-head B→B IE mean (null control)",
+        "a_to_b_indirect_effect_median": "Attention-head A→B IE median",
+        "c_to_b_indirect_effect_median": "Attention-head C→B IE median",
+        "ie_delta_a_minus_c_mean": "Attention-head ΔIE mean: A→B minus C→B",
+        "ie_delta_a_minus_c_median": "Attention-head ΔIE median: A→B minus C→B",
+        "p_ie_a_gt_zero": "Directional consistency: P(IE A→B > 0)",
+        "p_ie_c_lt_zero": "Directional consistency: P(IE C→B < 0)",
+        "p_ie_delta_gt_zero": "Directional consistency: P(ΔIE > 0)",
     }
 
     output_paths: list[Path] = []
@@ -745,6 +917,10 @@ def plot_attention_heatmaps(
             vmax = float(np.max(finite_values)) if finite_values.size else 1.0
             if vmin == vmax:
                 vmax = vmin + 1.0
+        elif metric_name.startswith("p_ie_"):
+            cmap = "viridis"
+            center = None
+            vmin, vmax = 0.0, 1.0
         else:
             cmap = "RdBu_r"
             center = 0
@@ -801,6 +977,9 @@ def plot_mlp_results(
     c_indirect = safe_average(
         accumulator["c_indirect_sums"], accumulator["c_effect_counts"]
     )
+    b_indirect = safe_average(
+        accumulator["b_indirect_sums"], accumulator["b_effect_counts"]
+    )
     paired = (
         (accumulator["effect_counts"] == accumulator["c_effect_counts"])
         & (accumulator["effect_counts"] > 0)
@@ -814,11 +993,12 @@ def plot_mlp_results(
             accumulator["patched_sums"],
             accumulator["effect_counts"],
         )[valid_mask],
-        "indirect_effect": safe_average(
+        "a_to_b_indirect_effect": safe_average(
             accumulator["indirect_sums"],
             accumulator["effect_counts"],
         )[valid_mask],
         "c_to_b_indirect_effect": c_indirect[valid_mask],
+        "b_to_b_indirect_effect": b_indirect[valid_mask],
         "indirect_effect_difference_a_minus_c": np.where(
             paired, a_indirect - c_indirect, np.nan
         )[valid_mask],
@@ -826,8 +1006,9 @@ def plot_mlp_results(
     titles = {
         "normalized_restoration": "MLP normalized restoration",
         "patched_logit_difference": "MLP patched logit difference",
-        "indirect_effect": "MLP indirect effect",
+        "a_to_b_indirect_effect": "MLP A→B indirect effect",
         "c_to_b_indirect_effect": "MLP C→B indirect effect",
+        "b_to_b_indirect_effect": "MLP B→B indirect effect (null control)",
         "indirect_effect_difference_a_minus_c": (
             "MLP IE difference: A→B minus C→B"
         ),
@@ -843,9 +1024,19 @@ def plot_mlp_results(
         global_mean = np.array(
             [nanmean_or_nan(values[:, layer]) for layer in layers]
         )
+        global_median = np.array(
+            [nanmedian_or_nan(values[:, layer]) for layer in layers]
+        )
 
         figure, axis = plt.subplots(figsize=(12, 6))
-        axis.plot(layers, global_mean, marker="o", linewidth=2, markersize=4)
+        axis.plot(
+            layers, global_mean, marker="o", linewidth=2, markersize=4,
+            label="Mean across abbreviations",
+        )
+        axis.plot(
+            layers, global_median, marker="s", linewidth=2, markersize=4,
+            linestyle="--", label="Median across abbreviations",
+        )
         axis.axhline(0, color="black", linewidth=1, linestyle="--", alpha=0.6)
         if metric_name == "patched_logit_difference":
             sentence_a_mean = nanmean_or_nan(baseline_means[:, 0])
@@ -862,7 +1053,7 @@ def plot_mlp_results(
                 linestyle=":",
                 label="Sentence B baseline",
             )
-            axis.legend()
+        axis.legend()
         axis.set_xlabel("Layer")
         axis.set_ylabel(metric_name.replace("_", " ").title())
         axis.set_title(titles[metric_name])
@@ -1021,12 +1212,18 @@ def run(args: argparse.Namespace) -> None:
         if int(row_index) not in validation_failures:
             accumulator["status"][row_index] = 0
             accumulator["skip_reasons"].pop(str(int(row_index)), None)
+    for status_key in ("c_status", "b_status"):
+        for row_index in np.flatnonzero(accumulator[status_key] == 2):
+            if int(row_index) not in validation_failures:
+                accumulator[status_key][row_index] = 0
+                accumulator["skip_reasons"].pop(str(int(row_index)), None)
     abbreviation_to_index = {
         abbreviation: index for index, abbreviation in enumerate(abbreviations)
     }
     if args.plot_only:
         write_summaries(
-            output_prefix, args.intervention, abbreviations, accumulator
+            output_prefix, args.intervention, abbreviations, accumulator,
+            include_bootstrap=True,
         )
         plots = (
             plot_attention_heatmaps(output_prefix, accumulator)
@@ -1046,10 +1243,12 @@ def run(args: argparse.Namespace) -> None:
     )
     completed_a_this_run = 0
     completed_c_this_run = 0
+    completed_b_this_run = 0
     for row_index in range(args.start_row, stop):
         needs_a = accumulator["status"][row_index] == 0
         needs_c = accumulator["c_status"][row_index] == 0
-        if not needs_a and not needs_c:
+        needs_b = accumulator["b_status"][row_index] == 0
+        if not needs_a and not needs_c and not needs_b:
             continue
         row = rows[row_index]
         abbreviation = row["ABBR"].strip()
@@ -1127,6 +1326,18 @@ def run(args: argparse.Namespace) -> None:
                     else np.full_like(indirect_c, np.nan)
                 )
 
+            if needs_b:
+                clean_b = capture_clean_activations(
+                    model, args.intervention, context_b,
+                    target_index, cache_dtype
+                )
+                patched_b = evaluate_patches(
+                    model, args.intervention, context_b, primary, alternative,
+                    target_index, clean_b, args.answer_reduction,
+                    args.patch_batch_size
+                )
+                indirect_b = patched_b - baseline[1]
+
             if needs_a:
                 accumulator["baseline_sums"][abbreviation_index] += baseline
                 accumulator["baseline_counts"][abbreviation_index] += 1
@@ -1152,12 +1363,20 @@ def run(args: argparse.Namespace) -> None:
                 accumulator["c_normalized_counts"][abbreviation_index][finite_c] += 1
                 accumulator["c_status"][row_index] = 1
                 completed_c_this_run += 1
+            if needs_b:
+                accumulator["b_patched_sums"][abbreviation_index] += patched_b
+                accumulator["b_indirect_sums"][abbreviation_index] += indirect_b
+                accumulator["b_effect_counts"][abbreviation_index] += 1
+                accumulator["b_status"][row_index] = 1
+                completed_b_this_run += 1
         except ValueError as error:
             print(f"  skipped: {error}")
             if needs_a:
                 accumulator["status"][row_index] = 2
             if needs_c:
                 accumulator["c_status"][row_index] = 2
+            if needs_b:
+                accumulator["b_status"][row_index] = 2
             accumulator["skip_reasons"][str(row_index)] = str(error)
         except (RuntimeError, IndexError) as error:
             print(f"  runtime failure; row will be retried: {error}")
@@ -1165,6 +1384,8 @@ def run(args: argparse.Namespace) -> None:
                 accumulator["status"][row_index] = 0
             if needs_c:
                 accumulator["c_status"][row_index] = 0
+            if needs_b:
+                accumulator["b_status"][row_index] = 0
             accumulator["skip_reasons"].pop(str(row_index), None)
 
         save_accumulator(accumulator_path, accumulator)
@@ -1172,6 +1393,10 @@ def run(args: argparse.Namespace) -> None:
             output_prefix, args.intervention, abbreviations, accumulator
         )
 
+    write_summaries(
+        output_prefix, args.intervention, abbreviations, accumulator,
+        include_bootstrap=True,
+    )
     if args.intervention == "attention_head":
         plots = plot_attention_heatmaps(output_prefix, accumulator)
     else:
@@ -1181,6 +1406,7 @@ def run(args: argparse.Namespace) -> None:
 
     print(f"Processed {completed_a_this_run} new A→B rows")
     print(f"Processed {completed_c_this_run} new C→B rows")
+    print(f"Processed {completed_b_this_run} new B→B rows")
     print(f"Accumulator: {accumulator_path}")
     print(f"Summaries: {output_prefix}_*.csv")
 

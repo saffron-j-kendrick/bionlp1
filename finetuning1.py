@@ -128,10 +128,19 @@ def count_trainable_params(model):
 ## MCQA ACCURACY
 
 def compute_mcqa_accuracy(model, tokenizer, dataset, max_length=512):
-    """Compute MCQA accuracy for options (A/B/C/D) by the log-likelihood the model assigns to the option text conditioned on the question + options. The predicted answer is the option with the highest log-likelihood."""
-   
+    """Compute accuracy from the next-token probabilities of A, B, C, and D."""
+
     model.eval()
     correct = 0
+    option_keys = ("A", "B", "C", "D")
+    option_token_ids = {}
+    for key in option_keys:
+        token_ids = tokenizer.encode(f" {key}", add_special_tokens=False)
+        if len(token_ids) != 1:
+            raise ValueError(
+                f"Option label {key!r} is not a single token: {token_ids}"
+            )
+        option_token_ids[key] = token_ids[0]
 
     with torch.no_grad():
         for example in tqdm(dataset, desc="MCQA accuracy"):
@@ -139,43 +148,39 @@ def compute_mcqa_accuracy(model, tokenizer, dataset, max_length=512):
             options    = example["options"]      # dict {A: text, B: text, ...}
             answer_idx = example["answer_idx"]   # e.g. "D"
 
-            opts_str = "\n".join(f"  {k}: {v}" for k, v in options.items())
+            missing_options = set(option_keys).difference(options)
+            if missing_options:
+                raise ValueError(
+                    f"Example is missing options: {sorted(missing_options)}"
+                )
+
+            opts_str = "\n".join(f"  {key}: {options[key]}" for key in option_keys)
             prefix = (
                 "### Question:\n"
                 f"{question}\n\n"
                 "### Options:\n"
                 f"{opts_str}\n\n"
-                "### Answer:\n"
+                "### Answer:"
             )
-            prefix_ids = tokenizer.encode(prefix, add_special_tokens=True)
-            prefix_len = len(prefix_ids)
-
-            scores = {}
-            for key, text in options.items():
-                full_text = prefix + f"{key}: {text}"
-                full_ids  = tokenizer.encode(
-                    full_text, add_special_tokens=True,
-                    truncation=True, max_length=max_length,
-                )
-                input_tensor = torch.tensor([full_ids], device=model.device)
-
-                outputs = model(input_tensor)
-                logits  = outputs.logits  # (1, seq_len, vocab_size)
-
-                # Score only the suffix tokens (the option text after the prefix)
-                suffix_start = min(prefix_len - 1, logits.shape[1] - 1)
-                suffix_logits = logits[0, suffix_start:-1, :]        # (suffix_len, vocab)
-                suffix_ids    = input_tensor[0, suffix_start + 1:]   # (suffix_len,)
-
-                if suffix_ids.numel() == 0:
-                    scores[key] = float('-inf')
-                    continue
-
-                log_probs = F.log_softmax(suffix_logits, dim=-1)
-                score = log_probs[range(len(suffix_ids)), suffix_ids].sum().item()
-                scores[key] = score
-
-            predicted = max(scores, key=scores.get)
+            encoded = tokenizer(
+                prefix,
+                return_tensors="pt",
+                truncation=True,
+                max_length=max_length,
+            )
+            encoded = {
+                key: value.to(model.device)
+                for key, value in encoded.items()
+            }
+            outputs = model(**encoded)
+            next_token_probabilities = F.softmax(
+                outputs.logits[0, -1, :], dim=-1
+            )
+            letter_probabilities = {
+                key: next_token_probabilities[token_id].item()
+                for key, token_id in option_token_ids.items()
+            }
+            predicted = max(letter_probabilities, key=letter_probabilities.get)
             if predicted == answer_idx:
                 correct += 1
 
@@ -285,7 +290,7 @@ def average_trajectories(trajectories):
 
 ## TRAINING CONFIG
 
-def make_args(output_dir, epochs=1, batch_size=4, max_steps=None):
+def make_args(output_dir, epochs=1, batch_size=4, max_steps=None, seed=42):
     kwargs = dict(
         output_dir=output_dir,
         num_train_epochs=epochs,
@@ -307,6 +312,8 @@ def make_args(output_dir, epochs=1, batch_size=4, max_steps=None):
         report_to="tensorboard",
         dataset_text_field="text",
         max_length=512,
+        seed=seed,
+        data_seed=seed,
     )
     if max_steps is not None:
         kwargs["max_steps"] = max_steps
@@ -324,12 +331,12 @@ def make_trainer(model, args, peft_cfg=None):
 
 LORA_TARGET_MODULES = ['up_proj', 'down_proj', 'gate_proj', 'k_proj', 'q_proj', 'v_proj', 'o_proj']
 
-SPECIFIC_LAYERS  = [11, 12, 13, 19, 31]   # edit to choose any indices 0–31
+SPECIFIC_LAYERS  = [0, 3, 14, 15, 16]   # edit to choose any indices 0–31
 NUM_LAYERS       = 32                  
 N_BOUNDARY_LAYERS = 5                      
 FIRST_LAYERS     = list(range(N_BOUNDARY_LAYERS))                            # [0,1,2,3,4]
 LAST_LAYERS      = list(range(NUM_LAYERS - N_BOUNDARY_LAYERS, NUM_LAYERS))   # [27,28,29,30,31]
-RANDOM_SEEDS     = [0, 1, 2, 3, 4]       
+RUN_SEEDS        = [0, 1, 2, 3, 4]
 N_RANDOM_LAYERS  = 5
 
 def make_lora_config(layers_to_transform=None):
@@ -386,141 +393,122 @@ def load_base_model():
     model.config.pad_token_id = tokenizer.eos_token_id
     return model
 
-## EXPERIMENT 1 — FULL LoRA (all layers)
-
-model_lora_full = load_base_model()
-lora_config_full = make_lora_config(layers_to_transform=None)
-count_trainable_params(model_lora_full)
-
-trainer_lora_full = make_trainer(model_lora_full, make_args("checkpoints/lora_full"), peft_cfg=lora_config_full)
-trainer_lora_full.train()
-trainer_lora_full.model.save_pretrained("models/lora_full")
-tokenizer.save_pretrained("models/lora_full")
-
-# results_lora_full = trainer_lora_full.evaluate(test_dataset)  # full-sequence loss (commented out)
-traj_full          = extract_trajectory(trainer_lora_full.state.log_history)
-ans_loss_full      = compute_answer_token_loss(trainer_lora_full.model, tokenizer, test_dataset)
-accuracy_lora_full = compute_mcqa_accuracy(trainer_lora_full.model, tokenizer, test_dataset)
-results_lora_full  = {"answer_token_loss": ans_loss_full, "mcqa_accuracy": accuracy_lora_full}
-print(f"Full LoRA   →  answer-token loss: {ans_loss_full:.4f}  |  MCQA accuracy: {accuracy_lora_full:.4f}")
-
-del model_lora_full
-free_memory()
-
-## EXPERIMENT 2 — SPECIFIC-LAYER LoRA 
-
-model_lora_specific = load_base_model()
-lora_config_specific = make_lora_config(layers_to_transform=SPECIFIC_LAYERS)
-count_trainable_params(model_lora_specific)
-
-trainer_lora_specific = make_trainer(model_lora_specific, make_args("checkpoints/lora_specific"), peft_cfg=lora_config_specific)
-trainer_lora_specific.train()
-trainer_lora_specific.model.save_pretrained("models/lora_specific")
-tokenizer.save_pretrained("models/lora_specific")
-
-# results_lora_specific = trainer_lora_specific.evaluate(test_dataset)  # full-sequence loss (commented out)
-traj_specific          = extract_trajectory(trainer_lora_specific.state.log_history)
-ans_loss_specific      = compute_answer_token_loss(trainer_lora_specific.model, tokenizer, test_dataset)
-accuracy_lora_specific = compute_mcqa_accuracy(trainer_lora_specific.model, tokenizer, test_dataset)
-results_lora_specific  = {"answer_token_loss": ans_loss_specific, "mcqa_accuracy": accuracy_lora_specific}
-print(f"Specific LoRA →  answer-token loss: {ans_loss_specific:.4f}  |  MCQA accuracy: {accuracy_lora_specific:.4f}")
-
-del model_lora_specific
-free_memory()
-
-## EXPERIMENT 3 — FIRST-LAYER LoRA
-
-model_lora_first = load_base_model()
-lora_config_first = make_lora_config(layers_to_transform=FIRST_LAYERS)
-count_trainable_params(model_lora_first)
-
-trainer_lora_first = make_trainer(model_lora_first, make_args("checkpoints/lora_first"), peft_cfg=lora_config_first)
-trainer_lora_first.train()
-trainer_lora_first.model.save_pretrained("models/lora_first")
-tokenizer.save_pretrained("models/lora_first")
-
-# trainer_lora_first.evaluate(test_dataset)  # full-sequence loss (commented out)
-traj_first          = extract_trajectory(trainer_lora_first.state.log_history)
-ans_loss_first      = compute_answer_token_loss(trainer_lora_first.model, tokenizer, test_dataset)
-accuracy_lora_first = compute_mcqa_accuracy(trainer_lora_first.model, tokenizer, test_dataset)
-results_lora_first  = {"answer_token_loss": ans_loss_first, "mcqa_accuracy": accuracy_lora_first}
-print(f"First-layer LoRA  →  answer-token loss: {ans_loss_first:.4f}  |  MCQA accuracy: {accuracy_lora_first:.4f}")
-
-del model_lora_first
-free_memory()
-
-## EXPERIMENT 4 — LAST-LAYER LoRA
-
-model_lora_last = load_base_model()
-lora_config_last = make_lora_config(layers_to_transform=LAST_LAYERS)
-count_trainable_params(model_lora_last)
-
-trainer_lora_last = make_trainer(model_lora_last, make_args("checkpoints/lora_last"), peft_cfg=lora_config_last)
-trainer_lora_last.train()
-trainer_lora_last.model.save_pretrained("models/lora_last")
-tokenizer.save_pretrained("models/lora_last")
-
-# trainer_lora_last.evaluate(test_dataset)  # full-sequence loss (commented out)
-traj_last          = extract_trajectory(trainer_lora_last.state.log_history)
-ans_loss_last      = compute_answer_token_loss(trainer_lora_last.model, tokenizer, test_dataset)
-accuracy_lora_last = compute_mcqa_accuracy(trainer_lora_last.model, tokenizer, test_dataset)
-results_lora_last  = {"answer_token_loss": ans_loss_last, "mcqa_accuracy": accuracy_lora_last}
-print(f"Last-layer LoRA   →  answer-token loss: {ans_loss_last:.4f}  |  MCQA accuracy: {accuracy_lora_last:.4f}")
-
-del model_lora_last
-free_memory()
-
-## EXPERIMENT 5 — RANDOM-LAYER LoRA
-
-random_run_results = []   # list of dicts, one per seed
-random_trajectories = []  # list of trajectory tuples, one per seed
-
-for seed in RANDOM_SEEDS:
+def set_run_seed(seed):
+    """Seed model initialisation, data ordering, and training stochasticity."""
     random.seed(seed)
-    chosen_layers = sorted(random.sample(range(NUM_LAYERS), N_RANDOM_LAYERS))
-    print(f"\n  Seed {seed}  →  layers {chosen_layers}")
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
 
-    model_rand = load_base_model()
-    lora_cfg   = make_lora_config(layers_to_transform=chosen_layers)
-    count_trainable_params(model_rand)
 
-    trainer_rand = make_trainer(
-        model_rand,
-        make_args(f"checkpoints/lora_random_seed{seed}"),
-        peft_cfg=lora_cfg,
+def run_lora_repeats(experiment_name, layers_to_transform, random_layers=False):
+    """Train one LoRA strategy five times and aggregate metrics/trajectories."""
+    run_results = []
+    trajectories = []
+
+    for seed in RUN_SEEDS:
+        set_run_seed(seed)
+        if random_layers:
+            layer_rng = random.Random(seed)
+            chosen_layers = sorted(
+                layer_rng.sample(range(NUM_LAYERS), N_RANDOM_LAYERS)
+            )
+        else:
+            chosen_layers = (
+                None
+                if layers_to_transform is None
+                else list(layers_to_transform)
+            )
+
+        layer_description = (
+            "all layers" if chosen_layers is None else f"layers {chosen_layers}"
+        )
+        print(f"\n{experiment_name}, seed {seed}  →  {layer_description}")
+
+        model = load_base_model()
+        lora_cfg = make_lora_config(layers_to_transform=chosen_layers)
+        output_stem = f"{experiment_name}_seed{seed}"
+        trainer = make_trainer(
+            model,
+            make_args(f"checkpoints/{output_stem}", seed=seed),
+            peft_cfg=lora_cfg,
+        )
+        count_trainable_params(trainer.model)
+        trainer.train()
+
+        model_dir = f"models/{output_stem}"
+        trainer.model.save_pretrained(model_dir)
+        tokenizer.save_pretrained(model_dir)
+
+        answer_loss = compute_answer_token_loss(
+            trainer.model, tokenizer, test_dataset
+        )
+        accuracy = compute_mcqa_accuracy(
+            trainer.model, tokenizer, test_dataset
+        )
+        run_results.append({
+            "answer_token_loss": answer_loss,
+            "mcqa_accuracy": accuracy,
+            "seed": seed,
+            "layers_chosen": (
+                list(range(NUM_LAYERS))
+                if chosen_layers is None
+                else chosen_layers
+            ),
+        })
+        trajectories.append(
+            extract_trajectory(trainer.state.log_history)
+        )
+        print(
+            f"  answer-token loss: {answer_loss:.4f}  |  "
+            f"MCQA accuracy: {accuracy:.4f}"
+        )
+
+        del trainer, model
+        free_memory()
+
+    losses = [result["answer_token_loss"] for result in run_results]
+    accuracies = [result["mcqa_accuracy"] for result in run_results]
+    aggregate = {
+        "answer_token_loss": float(np.mean(losses)),
+        "answer_token_loss_std": float(np.std(losses)),
+        "mcqa_accuracy": float(np.mean(accuracies)),
+        "mcqa_accuracy_std": float(np.std(accuracies)),
+        "per_seed": run_results,
+    }
+    trajectory_average = average_trajectories(trajectories)
+
+    print(
+        f"\n{experiment_name} (mean ± std across {len(RUN_SEEDS)} runs):"
     )
-    trainer_rand.train()
-    trainer_rand.model.save_pretrained(f"models/lora_random_seed{seed}")
-    tokenizer.save_pretrained(f"models/lora_random_seed{seed}")
+    print(
+        f"  answer-token loss: {aggregate['answer_token_loss']:.4f} "
+        f"± {aggregate['answer_token_loss_std']:.4f}"
+    )
+    print(
+        f"  accuracy:          {aggregate['mcqa_accuracy']:.4f} "
+        f"± {aggregate['mcqa_accuracy_std']:.4f}"
+    )
+    return aggregate, trajectory_average
 
-    # res = trainer_rand.evaluate(test_dataset)  # full-sequence loss (commented out)
-    ans_loss_rand = compute_answer_token_loss(trainer_rand.model, tokenizer, test_dataset)
-    acc           = compute_mcqa_accuracy(trainer_rand.model, tokenizer, test_dataset)
-    res = {"answer_token_loss": ans_loss_rand, "mcqa_accuracy": acc,
-           "seed": seed, "layers_chosen": chosen_layers}
-    random_run_results.append(res)
-    random_trajectories.append(extract_trajectory(trainer_rand.state.log_history))
-    print(f"  Seed {seed}  →  answer-token loss: {ans_loss_rand:.4f}  |  MCQA accuracy: {acc:.4f}")
 
-    del model_rand
-    free_memory()
+## EXPERIMENTS — FIVE RUNS PER LoRA STRATEGY
 
-# Aggregate across seeds
-rand_losses     = [r["answer_token_loss"] for r in random_run_results]
-rand_accuracies = [r["mcqa_accuracy"]     for r in random_run_results]
-
-results_lora_random = {
-    "answer_token_loss":     float(np.mean(rand_losses)),
-    "answer_token_loss_std": float(np.std(rand_losses)),
-    "mcqa_accuracy":         float(np.mean(rand_accuracies)),
-    "mcqa_accuracy_std":     float(np.std(rand_accuracies)),
-    "per_seed":              random_run_results,
-}
-traj_random_avg = average_trajectories(random_trajectories)
-
-print(f"\nRandom LoRA (mean ± std across {len(RANDOM_SEEDS)} seeds):")
-print(f"  answer-token loss: {results_lora_random['answer_token_loss']:.4f} ± {results_lora_random['answer_token_loss_std']:.4f}")
-print(f"  accuracy:          {results_lora_random['mcqa_accuracy']:.4f} ± {results_lora_random['mcqa_accuracy_std']:.4f}")
+results_lora_full, traj_full_avg = run_lora_repeats(
+    "lora_full", layers_to_transform=None
+)
+results_lora_specific, traj_specific_avg = run_lora_repeats(
+    "lora_specific", layers_to_transform=SPECIFIC_LAYERS
+)
+results_lora_first, traj_first_avg = run_lora_repeats(
+    "lora_first", layers_to_transform=FIRST_LAYERS
+)
+results_lora_last, traj_last_avg = run_lora_repeats(
+    "lora_last", layers_to_transform=LAST_LAYERS
+)
+results_lora_random, traj_random_avg = run_lora_repeats(
+    "lora_random", layers_to_transform=None, random_layers=True
+)
 
 ## RESULTS SUMMARY
 
@@ -546,11 +534,11 @@ for name, res in summary.items():
 ## FIGURES
 
 labels = [
-    "Full LoRA",
-    f"Specific Layers\n{SPECIFIC_LAYERS}",
-    f"First {N_BOUNDARY_LAYERS} Layers\n{FIRST_LAYERS}",
-    f"Last {N_BOUNDARY_LAYERS} Layers\n{LAST_LAYERS}",
-    f"Random Layers\n(mean of {len(RANDOM_SEEDS)} seeds)",
+    f"Full LoRA\n(mean of {len(RUN_SEEDS)} runs)",
+    f"Specific Layers\n{SPECIFIC_LAYERS}\n(mean of {len(RUN_SEEDS)} runs)",
+    f"First {N_BOUNDARY_LAYERS} Layers\n{FIRST_LAYERS}\n(mean of {len(RUN_SEEDS)} runs)",
+    f"Last {N_BOUNDARY_LAYERS} Layers\n{LAST_LAYERS}\n(mean of {len(RUN_SEEDS)} runs)",
+    f"Random Layers\n(mean of {len(RUN_SEEDS)} runs)",
 ]
 losses     = [r["answer_token_loss"]     for r in summary.values()]
 accuracies = [r["mcqa_accuracy"]         for r in summary.values()]
@@ -595,33 +583,26 @@ fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 ax_train, ax_eval = axes
 
 experiment_trajs = [
-    ("Full LoRA",           traj_full,     None),
-    ("Specific Layers",     traj_specific, None),
-    ("First Layers",        traj_first,    None),
-    ("Last Layers",         traj_last,     None),
-    ("Random Layers (avg)", None,          traj_random_avg),
+    ("Full LoRA",           traj_full_avg),
+    ("Specific Layers",     traj_specific_avg),
+    ("First Layers",        traj_first_avg),
+    ("Last Layers",         traj_last_avg),
+    ("Random Layers (avg)", traj_random_avg),
 ]
 
-for label, traj, traj_avg in experiment_trajs:
+for label, traj_avg in experiment_trajs:
     col = traj_colours[label]
-
-    if traj_avg is not None:
-        # averaged random: traj_avg = (tr_steps, tr_mean, tr_std, ev_steps, ev_mean, ev_std)
-        tr_steps, tr_mean, tr_std, ev_steps, ev_mean, ev_std = traj_avg
-        ax_train.plot(tr_steps, tr_mean, label=label, color=col)
-        ax_train.fill_between(tr_steps,
-                              [m - s for m, s in zip(tr_mean, tr_std)],
-                              [m + s for m, s in zip(tr_mean, tr_std)],
-                              alpha=0.2, color=col)
-        ax_eval.plot(ev_steps, ev_mean, marker='o', markersize=3, label=label, color=col)
-        ax_eval.fill_between(ev_steps,
-                             [m - s for m, s in zip(ev_mean, ev_std)],
-                             [m + s for m, s in zip(ev_mean, ev_std)],
-                             alpha=0.2, color=col)
-    else:
-        tr_steps, tr_losses, ev_steps, ev_losses = traj
-        ax_train.plot(tr_steps, tr_losses, label=label, color=col)
-        ax_eval.plot(ev_steps, ev_losses, marker='o', markersize=3, label=label, color=col)
+    tr_steps, tr_mean, tr_std, ev_steps, ev_mean, ev_std = traj_avg
+    ax_train.plot(tr_steps, tr_mean, label=label, color=col)
+    ax_train.fill_between(tr_steps,
+                          [m - s for m, s in zip(tr_mean, tr_std)],
+                          [m + s for m, s in zip(tr_mean, tr_std)],
+                          alpha=0.2, color=col)
+    ax_eval.plot(ev_steps, ev_mean, marker='o', markersize=3, label=label, color=col)
+    ax_eval.fill_between(ev_steps,
+                         [m - s for m, s in zip(ev_mean, ev_std)],
+                         [m + s for m, s in zip(ev_mean, ev_std)],
+                         alpha=0.2, color=col)
 
 ax_train.set_xlabel("Training Step")
 ax_train.set_ylabel("Training Loss")
@@ -631,7 +612,7 @@ sns.despine(ax=ax_train)
 
 ax_eval.set_xlabel("Training Step")
 ax_eval.set_ylabel("Eval Loss (full sequence, trainer internal)")
-ax_eval.set_title("Validation Loss Trajectory (full-seq)\n(shaded = ±1 std across random seeds)")
+ax_eval.set_title("Validation Loss Trajectory (full-seq)\n(shaded = ±1 std across runs)")
 ax_eval.legend(loc="upper right")
 sns.despine(ax=ax_eval)
 

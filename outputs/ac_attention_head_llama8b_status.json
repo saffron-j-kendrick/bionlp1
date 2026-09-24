@@ -1,0 +1,33 @@
+{
+  "baseline": {
+    "processed": 650,
+    "skipped": 0,
+    "pending": 0
+  },
+  "ac": {
+    "processed": 650,
+    "skipped": 0,
+    "pending": 0
+  },
+  "ca": {
+    "processed": 650,
+    "skipped": 0,
+    "pending": 0
+  },
+  "aa": {
+    "processed": 650,
+    "skipped": 0,
+    "pending": 0
+  },
+  "cc": {
+    "processed": 650,
+    "skipped": 0,
+    "pending": 0
+  },
+  "bie": {
+    "processed": 650,
+    "skipped": 0,
+    "pending": 0
+  },
+  "skip_reasons": {}
+}

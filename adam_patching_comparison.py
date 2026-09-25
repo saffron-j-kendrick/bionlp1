@@ -43,8 +43,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--output-prefix", type=Path, dest="output_prefix_override")
     p.add_argument("--start-row", type=int, default=0)
     p.add_argument("--max-rows", type=int, default=0)
-    p.add_argument("--batch-size", type=int, default=24)
-    p.add_argument("--answer-reduction", choicecs=("mean", "sum"), default="mean")
+    p.add_argument("--patch_batch-size", type=int, default=24)
+    p.add_argument("--answer-reduction", choices=("mean", "sum"), default="mean")
     p.add_argument("--cache-dtype", choices=("float32", "float16", "bfloat16"), default="bfloat16")
     p.add_argument("--device-map", default="auto")
     p.add_argument("--min-total-effect", type=float, default=1e-6)
@@ -126,7 +126,7 @@ def compare_attention_heatmaps(start_data: dict[str, np.ndarray], end_data: dict
 
     out_dir.mkdir(parents=True, exist_ok = True)
     output_paths: list[Path] = []
-    layers = list(range(n_layers))
+    layers = list(range(1, n_layers + 1))
     heads = list(range(n_heads))
 
     for col, label in COMPARE_METRICS:
@@ -348,7 +348,7 @@ def main() -> None:
     print()
 
     import argparse as _ap
-    base_args = _ap.Namespace(dataset=dataset, model=args.model, intervention=args.intervention, accumulator=acc_path, output_prefix=pfx, start_row=args.start_row, max_rows = args.max_rows, patch_batch_size=args.patch_bath_size, answer_reduction = args.answer_reduction, cache_dtype=args.cache_dtype, device_map=args.device_map, min_total_effect=args.min_total_effect, dry_run=args.dry_run, plot_only = False )
+    base_args = _ap.Namespace(dataset=dataset, model=args.model, intervention=args.intervention, accumulator=acc_path, output_prefix=pfx, start_row=args.start_row, max_rows = args.max_rows, patch_batch_size=args.patch_batch_size, answer_reduction = args.answer_reduction, cache_dtype=args.cache_dtype, device_map=args.device_map, min_total_effect=args.min_total_effect, dry_run=args.dry_run, plot_only = False )
     _base.run(base_args)
 
 

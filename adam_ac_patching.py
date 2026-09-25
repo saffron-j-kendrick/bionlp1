@@ -604,7 +604,7 @@ def _heatmap(axis: Any, values: np.ndarray, title: str, metric_name: str) -> Non
         limit = limit or 1.0
         vmin, vmax = -limit, limit
 
-    sns.heatmap(values, ax=axis, cmap=cmap, center=center, vmin=vmin, vmax=vmax, xticklabels=np.arange(N_HEADS), yticklabels=np.arange(N_LAYERS), cbar_kws={"label": metric_name.replace("_", " ").title()})
+    sns.heatmap(values, ax=axis, cmap=cmap, center=center, vmin=vmin, vmax=vmax, xticklabels=np.arange(N_HEADS), yticklabels=np.arange(1, N_LAYERS + 1), cbar_kws={"label": metric_name.replace("_", " ").title()})
     axis.set_xlabel("Attention head")
     axis.set_ylabel("Layer")
     axis.set_title(title)

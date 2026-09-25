@@ -1,29 +1,420 @@
 {
   "lora_full": {
-    "answer_token_loss": 0.1087093844733583,
-    "mcqa_accuracy": 0.6197957580518461
-  },
-  "lora_specific": {
-    "answer_token_loss": 0.11658995806069695,
-    "mcqa_accuracy": 0.5758051846032993
-  },
-  "lora_first": {
-    "answer_token_loss": 0.11632337128853483,
-    "mcqa_accuracy": 0.5742340926944226
-  },
-  "lora_last": {
-    "answer_token_loss": 0.12880496966545812,
-    "mcqa_accuracy": 0.5365278868813825
-  },
-  "lora_random": {
-    "answer_token_loss": 0.11367582641532141,
-    "answer_token_loss_std": 0.0011024698248911996,
-    "mcqa_accuracy": 0.5930871956009426,
-    "mcqa_accuracy_std": 0.00435960311877819,
+    "answer_token_loss": 0.10913917088219323,
+    "answer_token_loss_std": 0.0008622195935954478,
+    "mcqa_accuracy": 0.618381775333857,
+    "mcqa_accuracy_std": 0.0020724125621795634,
     "per_seed": [
       {
-        "answer_token_loss": 0.11449851099424778,
-        "mcqa_accuracy": 0.5930871956009427,
+        "answer_token_loss": 0.10823352483179015,
+        "mcqa_accuracy": 0.6182246661429693,
+        "seed": 0,
+        "layers_chosen": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ]
+      },
+      {
+        "answer_token_loss": 0.10905050722485017,
+        "mcqa_accuracy": 0.6182246661429693,
+        "seed": 1,
+        "layers_chosen": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ]
+      },
+      {
+        "answer_token_loss": 0.10845535903582615,
+        "mcqa_accuracy": 0.6158680282796544,
+        "seed": 2,
+        "layers_chosen": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ]
+      },
+      {
+        "answer_token_loss": 0.10926639863503218,
+        "mcqa_accuracy": 0.622152395915161,
+        "seed": 3,
+        "layers_chosen": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ]
+      },
+      {
+        "answer_token_loss": 0.1106900646834675,
+        "mcqa_accuracy": 0.617439120188531,
+        "seed": 4,
+        "layers_chosen": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ]
+      }
+    ]
+  },
+  "lora_specific": {
+    "answer_token_loss": 0.11452914415819201,
+    "answer_token_loss_std": 0.000507128798317782,
+    "mcqa_accuracy": 0.5965435978004713,
+    "mcqa_accuracy_std": 0.0030464602403244695,
+    "per_seed": [
+      {
+        "answer_token_loss": 0.1144646661092083,
+        "mcqa_accuracy": 0.596229379418696,
+        "seed": 0,
+        "layers_chosen": [
+          0,
+          3,
+          14,
+          15,
+          16
+        ]
+      },
+      {
+        "answer_token_loss": 0.11411604701637207,
+        "mcqa_accuracy": 0.5978004713275726,
+        "seed": 1,
+        "layers_chosen": [
+          0,
+          3,
+          14,
+          15,
+          16
+        ]
+      },
+      {
+        "answer_token_loss": 0.11540259977323164,
+        "mcqa_accuracy": 0.591516103692066,
+        "seed": 2,
+        "layers_chosen": [
+          0,
+          3,
+          14,
+          15,
+          16
+        ]
+      },
+      {
+        "answer_token_loss": 0.11396391247023722,
+        "mcqa_accuracy": 0.596229379418696,
+        "seed": 3,
+        "layers_chosen": [
+          0,
+          3,
+          14,
+          15,
+          16
+        ]
+      },
+      {
+        "answer_token_loss": 0.11469849542191084,
+        "mcqa_accuracy": 0.600942655145326,
+        "seed": 4,
+        "layers_chosen": [
+          0,
+          3,
+          14,
+          15,
+          16
+        ]
+      }
+    ]
+  },
+  "lora_first": {
+    "answer_token_loss": 0.11591320875044349,
+    "answer_token_loss_std": 0.000780866260727629,
+    "mcqa_accuracy": 0.5822466614296936,
+    "mcqa_accuracy_std": 0.0038290833014780444,
+    "per_seed": [
+      {
+        "answer_token_loss": 0.1169451243868877,
+        "mcqa_accuracy": 0.5875883739198743,
+        "seed": 0,
+        "layers_chosen": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      {
+        "answer_token_loss": 0.11479865354126348,
+        "mcqa_accuracy": 0.5813040062843676,
+        "seed": 1,
+        "layers_chosen": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      {
+        "answer_token_loss": 0.11622719026053555,
+        "mcqa_accuracy": 0.5828750981932443,
+        "seed": 2,
+        "layers_chosen": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      {
+        "answer_token_loss": 0.11524241011356827,
+        "mcqa_accuracy": 0.5836606441476826,
+        "seed": 3,
+        "layers_chosen": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      {
+        "answer_token_loss": 0.1163526654499624,
+        "mcqa_accuracy": 0.5758051846032993,
+        "seed": 4,
+        "layers_chosen": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    ]
+  },
+  "lora_last": {
+    "answer_token_loss": 0.12971212535686794,
+    "answer_token_loss_std": 0.00014449131642261067,
+    "mcqa_accuracy": 0.5326001571091908,
+    "mcqa_accuracy_std": 0.0044989225650514855,
+    "per_seed": [
+      {
+        "answer_token_loss": 0.12984284575479338,
+        "mcqa_accuracy": 0.5263157894736842,
+        "seed": 0,
+        "layers_chosen": [
+          27,
+          28,
+          29,
+          30,
+          31
+        ]
+      },
+      {
+        "answer_token_loss": 0.12988556033916396,
+        "mcqa_accuracy": 0.5396700706991359,
+        "seed": 1,
+        "layers_chosen": [
+          27,
+          28,
+          29,
+          30,
+          31
+        ]
+      },
+      {
+        "answer_token_loss": 0.12957601305247513,
+        "mcqa_accuracy": 0.5302435192458759,
+        "seed": 2,
+        "layers_chosen": [
+          27,
+          28,
+          29,
+          30,
+          31
+        ]
+      },
+      {
+        "answer_token_loss": 0.12951725394295957,
+        "mcqa_accuracy": 0.5318146111547526,
+        "seed": 3,
+        "layers_chosen": [
+          27,
+          28,
+          29,
+          30,
+          31
+        ]
+      },
+      {
+        "answer_token_loss": 0.12973895369494767,
+        "mcqa_accuracy": 0.5349567949725059,
+        "seed": 4,
+        "layers_chosen": [
+          27,
+          28,
+          29,
+          30,
+          31
+        ]
+      }
+    ]
+  },
+  "lora_random": {
+    "answer_token_loss": 0.11370118159600366,
+    "answer_token_loss_std": 0.0016316650262223646,
+    "mcqa_accuracy": 0.5935585231736057,
+    "mcqa_accuracy_std": 0.0032805362164683547,
+    "per_seed": [
+      {
+        "answer_token_loss": 0.11486427858072708,
+        "mcqa_accuracy": 0.591516103692066,
         "seed": 0,
         "layers_chosen": [
           2,
@@ -34,8 +425,8 @@
         ]
       },
       {
-        "answer_token_loss": 0.11265529226449145,
-        "mcqa_accuracy": 0.593872741555381,
+        "answer_token_loss": 0.11218097228251134,
+        "mcqa_accuracy": 0.596229379418696,
         "seed": 1,
         "layers_chosen": [
           4,
@@ -46,7 +437,7 @@
         ]
       },
       {
-        "answer_token_loss": 0.11227588791340816,
+        "answer_token_loss": 0.11213290488696992,
         "mcqa_accuracy": 0.598586017282011,
         "seed": 2,
         "layers_chosen": [
@@ -58,8 +449,8 @@
         ]
       },
       {
-        "answer_token_loss": 0.1137255183663378,
-        "mcqa_accuracy": 0.5946582875098193,
+        "answer_token_loss": 0.11303066309653574,
+        "mcqa_accuracy": 0.5899450117831894,
         "seed": 3,
         "layers_chosen": [
           4,
@@ -70,8 +461,8 @@
         ]
       },
       {
-        "answer_token_loss": 0.11522392253812185,
-        "mcqa_accuracy": 0.5852317360565593,
+        "answer_token_loss": 0.11629708913327425,
+        "mcqa_accuracy": 0.591516103692066,
         "seed": 4,
         "layers_chosen": [
           6,
